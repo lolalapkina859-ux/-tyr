@@ -460,40 +460,90 @@ def analyze(
             return None
 
     # =====================================================
-    # REQUIRE 15M CONFIRMATION FOR STRONG SIGNALS
+    # REQUIRE 15M STRUCTURE CONFIRMATION
     # =====================================================
+
+    # Liquidity creates the setup.
+    # BOS / structure shift on 15M gives permission
+    # to treat it as a confirmed trading signal.
 
     if side == "LONG":
 
-        confirmation = (
+        structure_confirmed = bool(
             struct.get("bullish")
-            or bool(last15["wt_cross_up"])
-            or (
-                _wt_turning_up(m15)
-                and _mf_rising(m15)
-            )
+        )
+
+        momentum_confirmed = (
+            bool(last15["wt_cross_up"])
+            or _wt_turning_up(m15)
+        )
+
+        money_flow_confirmed = (
+            _mf_rising(m15)
         )
 
     else:
 
-        confirmation = (
+        structure_confirmed = bool(
             struct.get("bearish")
-            or bool(last15["wt_cross_down"])
-            or (
-                _wt_turning_down(m15)
-                and _mf_falling(m15)
-            )
         )
 
-    if not confirmation:
+        momentum_confirmed = (
+            bool(last15["wt_cross_down"])
+            or _wt_turning_down(m15)
+        )
+
+        money_flow_confirmed = (
+            _mf_falling(m15)
+        )
+
+    # -----------------------------------------------------
+    # NO BOS / STRUCTURE SHIFT = WATCH ONLY
+    # -----------------------------------------------------
+
+    if not structure_confirmed:
+
+        # Не позволяем такому сетапу стать сигналом 70+
+        # даже если liquidity + momentum набрали много баллов.
+        score = min(
+            score,
+            69,
+        )
+
+        reasons.append(
+            "15M structure NOT confirmed — WATCH only"
+        )
+
+    # -----------------------------------------------------
+    # STRUCTURE EXISTS, BUT MOMENTUM IS WEAK
+    # -----------------------------------------------------
+
+    elif not momentum_confirmed:
 
         score = max(
-            score - 15,
+            score - 10,
             0,
         )
 
         reasons.append(
-            "15M confirmation still weak"
+            "15M structure confirmed but momentum weak"
+        )
+
+    # -----------------------------------------------------
+    # FULL 15M CONFIRMATION
+    # -----------------------------------------------------
+
+    elif (
+        structure_confirmed
+        and momentum_confirmed
+        and money_flow_confirmed
+    ):
+
+        score += 5
+
+        reasons.append(
+            "15M full confirmation: "
+            "structure + momentum + money flow"
         )
 
     # =====================================================
