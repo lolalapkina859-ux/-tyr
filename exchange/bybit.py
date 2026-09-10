@@ -163,3 +163,77 @@ def get_klines(
             time.sleep(1 + attempt)
 
     return None
+
+def get_top_symbols(limit: int = 30) -> list[str]:
+    url = f"{BINGX_BASE_URL}/openApi/swap/v2/quote/ticker"
+
+    try:
+        r = requests.get(
+            url,
+            headers={"User-Agent": "TradeVision24-7"},
+            timeout=20
+        )
+
+        r.raise_for_status()
+
+        data = r.json()
+
+        if data.get("code") not in (0, "0", None):
+            raise RuntimeError(
+                f"BingX error: {data.get('code')} "
+                f"{data.get('msg')}"
+            )
+
+        rows = data.get("data", [])
+
+        ranked = []
+
+        for row in rows:
+            symbol = row.get("symbol", "")
+
+            if not symbol.endswith("-USDT"):
+                continue
+
+            volume = row.get("quoteVolume")
+
+            if volume is None:
+                volume = row.get("turnover24h")
+
+            if volume is None:
+                volume = row.get("volume")
+
+            try:
+                volume = float(volume)
+            except:
+                volume = 0
+
+            ranked.append(
+                (
+                    symbol.replace("-", ""),
+                    volume
+                )
+            )
+
+        ranked.sort(
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        symbols = [
+            symbol
+            for symbol, _ in ranked[:limit]
+        ]
+
+        print(
+            f"[BingX] TOP {len(symbols)} symbols: "
+            f"{symbols}"
+        )
+
+        return symbols
+
+    except Exception as exc:
+        print(
+            f"[BingX] TOP symbols error: {exc}"
+        )
+
+        return []
