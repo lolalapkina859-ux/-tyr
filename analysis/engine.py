@@ -581,69 +581,144 @@ def analyze(
         )
 
     # =====================================================
-    # TARGETS
-    # =====================================================
+# SMART TARGETS
+# =====================================================
 
-    all_levels = (
-        levels4
-        | levels15
-    )
+all_levels = (
+    levels4
+    | levels15
+)
 
-    targets = nearest_targets(
-        all_levels,
-        entry,
-        side,
-        4,
-    )
+risk = abs(entry - sl)
 
-    if not targets:
-        return None
+if risk <= 0:
+    return None
 
-    # =====================================================
-    # RISK / REWARD BONUS
-    # =====================================================
 
-    risk = abs(
-        entry - sl
-    )
+# Берём больше уровней, а потом фильтруем
+# их по нормальному Risk/Reward.
+raw_targets = nearest_targets(
+    all_levels,
+    entry,
+    side,
+    20,
+)
 
-    if risk <= 0:
-        return None
+if not raw_targets:
+    return None
 
-    first_target = float(
-        targets[0][0]
-    )
 
-    reward = abs(
-        first_target - entry
-    )
+# Минимальные R:R для целей.
+#
+# TP1 >= 0.70R
+# TP2 >= 1.30R
+# TP3 >= 2.00R
+# TP4 >= 3.00R
+#
+# Это не даёт боту ставить TP практически
+# возле точки входа.
+rr_steps = [
+    0.70,
+    1.30,
+    2.00,
+    3.00,
+]
 
-    rr1 = reward / risk
 
-    if rr1 >= 1.0:
+targets = []
+used_prices = set()
 
-        score += 5
 
-        reasons.append(
-            f"TP1 R:R {rr1:.2f}"
+for minimum_rr in rr_steps:
+
+    selected = None
+
+    for price, name in raw_targets:
+
+        price = float(price)
+
+        reward = abs(
+            price - entry
         )
 
-    if len(targets) >= 2:
+        rr = reward / risk
 
-        reward2 = abs(
-            float(targets[1][0])
-            - entry
+        rounded_price = round(
+            price,
+            12
         )
 
-        rr2 = reward2 / risk
-
-        if rr2 >= 2.0:
-
-            score += 5
-
-            reasons.append(
-                f"TP2 R:R {rr2:.2f}"
+        if (
+            rr >= minimum_rr
+            and rounded_price not in used_prices
+        ):
+            selected = (
+                price,
+                name,
             )
+
+            break
+
+    if selected:
+
+        targets.append(
+            selected
+        )
+
+        used_prices.add(
+            round(
+                selected[0],
+                12
+            )
+        )
+
+
+# Если структурных уровней недостаточно,
+# добавляем оставшиеся нормальные цели,
+# но не ближе 0.70R.
+if len(targets) < 4:
+
+    for price, name in raw_targets:
+
+        if len(targets) >= 4:
+            break
+
+        price = float(price)
+
+        rounded_price = round(
+            price,
+            12
+        )
+
+        if rounded_price in used_prices:
+            continue
+
+        reward = abs(
+            price - entry
+        )
+
+        rr = reward / risk
+
+        if rr < 0.70:
+            continue
+
+        targets.append(
+            (
+                price,
+                name,
+            )
+        )
+
+        used_prices.add(
+            rounded_price
+        )
+
+
+# Если даже TP1 не даёт хотя бы 0.70R,
+# такой торговый план нам не нужен.
+if not targets:
+    return None
+
 
     # =====================================================
     # FINAL FILTER
