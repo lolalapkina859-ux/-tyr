@@ -2,10 +2,20 @@ import time
 import requests
 import pandas as pd
 
+
 BINGX_BASE_URL = "https://open-api.bingx.com"
 
 
+# =========================================================
+# SYMBOL FORMAT
+# =========================================================
+
 def _format_symbol(symbol: str) -> str:
+    """
+    BTCUSDT -> BTC-USDT
+    ETHUSDT -> ETH-USDT
+    """
+
     symbol = symbol.upper().replace("-", "")
 
     if symbol.endswith("USDT"):
@@ -13,6 +23,10 @@ def _format_symbol(symbol: str) -> str:
 
     return symbol
 
+
+# =========================================================
+# INTERVAL MAP
+# =========================================================
 
 INTERVAL_MAP = {
     "1": "1m",
@@ -30,6 +44,10 @@ INTERVAL_MAP = {
 }
 
 
+# =========================================================
+# GET KLINES
+# =========================================================
+
 def get_klines(
     symbol: str,
     interval: str,
@@ -37,9 +55,16 @@ def get_klines(
 ) -> pd.DataFrame | None:
 
     bingx_symbol = _format_symbol(symbol)
-    bingx_interval = INTERVAL_MAP.get(str(interval), str(interval))
 
-    url = f"{BINGX_BASE_URL}/openApi/swap/v3/quote/klines"
+    bingx_interval = INTERVAL_MAP.get(
+        str(interval),
+        str(interval)
+    )
+
+    url = (
+        f"{BINGX_BASE_URL}"
+        f"/openApi/swap/v3/quote/klines"
+    )
 
     params = {
         "symbol": bingx_symbol,
@@ -54,6 +79,7 @@ def get_klines(
     for attempt in range(3):
 
         try:
+
             r = requests.get(
                 url,
                 params=params,
@@ -65,42 +91,84 @@ def get_klines(
 
             data = r.json()
 
-            if data.get("code") not in (0, "0", None):
+            if data.get("code") not in (
+                0,
+                "0",
+                None,
+            ):
                 raise RuntimeError(
-                    f"BingX error: {data.get('code')} "
+                    f"BingX error: "
+                    f"{data.get('code')} "
                     f"{data.get('msg')}"
                 )
 
-            rows = data.get("data", [])
+            rows = data.get(
+                "data",
+                []
+            )
 
             if not rows:
-                raise RuntimeError("No kline data received")
+                raise RuntimeError(
+                    "No kline data received"
+                )
 
             normalized = []
 
             for row in rows:
 
-                if isinstance(row, list):
+                # -----------------------------------------
+                # LIST FORMAT
+                # -----------------------------------------
 
-                    normalized.append([
-                        row[0],
-                        row[1],
-                        row[2],
-                        row[3],
-                        row[4],
-                        row[5],
-                    ])
+                if isinstance(
+                    row,
+                    list
+                ):
 
-                elif isinstance(row, dict):
+                    if len(row) < 6:
+                        continue
 
-                    normalized.append([
-                        row.get("time") or row.get("openTime"),
-                        row.get("open"),
-                        row.get("high"),
-                        row.get("low"),
-                        row.get("close"),
-                        row.get("volume"),
-                    ])
+                    normalized.append(
+                        [
+                            row[0],  # time
+                            row[1],  # open
+                            row[2],  # high
+                            row[3],  # low
+                            row[4],  # close
+                            row[5],  # volume
+                        ]
+                    )
+
+                # -----------------------------------------
+                # DICT FORMAT
+                # -----------------------------------------
+
+                elif isinstance(
+                    row,
+                    dict
+                ):
+
+                    normalized.append(
+                        [
+                            row.get("time")
+                            or row.get("openTime"),
+
+                            row.get("open"),
+
+                            row.get("high"),
+
+                            row.get("low"),
+
+                            row.get("close"),
+
+                            row.get("volume"),
+                        ]
+                    )
+
+            if not normalized:
+                raise RuntimeError(
+                    "No valid kline rows"
+                )
 
             df = pd.DataFrame(
                 normalized,
@@ -114,17 +182,26 @@ def get_klines(
                 ]
             )
 
+            # -----------------------------------------
+            # CONVERT NUMBERS
+            # -----------------------------------------
+
             for col in [
                 "open",
                 "high",
                 "low",
                 "close",
-                "volume"
+                "volume",
             ]:
+
                 df[col] = pd.to_numeric(
                     df[col],
                     errors="coerce"
                 )
+
+            # -----------------------------------------
+            # CONVERT TIME
+            # -----------------------------------------
 
             df["time"] = pd.to_datetime(
                 pd.to_numeric(
@@ -135,6 +212,10 @@ def get_klines(
                 utc=True
             )
 
+            # -----------------------------------------
+            # CLEAN DATA
+            # -----------------------------------------
+
             df = (
                 df
                 .dropna()
@@ -144,7 +225,8 @@ def get_klines(
             )
 
             print(
-                f"[BingX] {symbol} "
+                f"[BingX] "
+                f"{symbol} "
                 f"{bingx_interval}: "
                 f"{len(df)} candles"
             )
@@ -154,23 +236,52 @@ def get_klines(
         except Exception as exc:
 
             print(
-                f"[BingX] {symbol} "
+                f"[BingX] "
+                f"{symbol} "
                 f"{bingx_interval} "
                 f"attempt {attempt + 1}: "
                 f"{exc}"
             )
 
-            time.sleep(1 + attempt)
+            time.sleep(
+                1 + attempt
+            )
 
     return None
 
-def get_top_symbols(limit: int = 30) -> list[str]:
-    url = f"{BINGX_BASE_URL}/openApi/swap/v2/quote/ticker"
+
+# =========================================================
+# GET TOP SYMBOLS BY 24H VOLUME
+# =========================================================
+
+def get_top_symbols(
+    limit: int = 30
+) -> list[str]:
+
+    """
+    Получает самые ликвидные USDT perpetual пары BingX.
+
+    Сортировка идёт по приблизительному
+    24H обороту в USDT.
+
+    Например:
+    BTC-USDT -> BTCUSDT
+    """
+
+    url = (
+        f"{BINGX_BASE_URL}"
+        f"/openApi/swap/v2/quote/ticker"
+    )
+
+    headers = {
+        "User-Agent": "TradeVision24-7"
+    }
 
     try:
+
         r = requests.get(
             url,
-            headers={"User-Agent": "TradeVision24-7"},
+            headers=headers,
             timeout=20
         )
 
@@ -178,41 +289,126 @@ def get_top_symbols(limit: int = 30) -> list[str]:
 
         data = r.json()
 
-        if data.get("code") not in (0, "0", None):
+        if data.get("code") not in (
+            0,
+            "0",
+            None,
+        ):
             raise RuntimeError(
-                f"BingX error: {data.get('code')} "
+                f"BingX error: "
+                f"{data.get('code')} "
                 f"{data.get('msg')}"
             )
 
-        rows = data.get("data", [])
+        rows = data.get(
+            "data",
+            []
+        )
+
+        if not rows:
+            raise RuntimeError(
+                "No ticker data received"
+            )
 
         ranked = []
 
         for row in rows:
-            symbol = row.get("symbol", "")
 
-            if not symbol.endswith("-USDT"):
+            if not isinstance(
+                row,
+                dict
+            ):
                 continue
 
-            volume = row.get("quoteVolume")
+            symbol = row.get(
+                "symbol",
+                ""
+            )
 
-            if volume is None:
-                volume = row.get("turnover24h")
+            if not symbol.endswith(
+                "-USDT"
+            ):
+                continue
 
-            if volume is None:
-                volume = row.get("volume")
+            # -----------------------------------------
+            # TRY READY QUOTE VOLUME FIRST
+            # -----------------------------------------
+
+            quote_volume = (
+                row.get("quoteVolume")
+                or row.get("turnover24h")
+                or row.get("quoteVol")
+            )
+
+            # -----------------------------------------
+            # FALLBACK:
+            # volume * last price
+            # -----------------------------------------
+
+            if quote_volume is None:
+
+                try:
+
+                    base_volume = float(
+                        row.get(
+                            "volume",
+                            0
+                        )
+                    )
+
+                    last_price = float(
+                        row.get("lastPrice")
+                        or row.get("last")
+                        or row.get("price")
+                        or 0
+                    )
+
+                    quote_volume = (
+                        base_volume
+                        * last_price
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+
+                    quote_volume = 0
 
             try:
-                volume = float(volume)
-            except:
-                volume = 0
+
+                quote_volume = float(
+                    quote_volume
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                quote_volume = 0
+
+            if quote_volume <= 0:
+                continue
+
+            clean_symbol = (
+                symbol
+                .replace(
+                    "-",
+                    ""
+                )
+            )
 
             ranked.append(
                 (
-                    symbol.replace("-", ""),
-                    volume
+                    clean_symbol,
+                    quote_volume,
                 )
             )
+
+        # -----------------------------------------
+        # SORT DESCENDING
+        # -----------------------------------------
 
         ranked.sort(
             key=lambda x: x[1],
@@ -221,19 +417,24 @@ def get_top_symbols(limit: int = 30) -> list[str]:
 
         symbols = [
             symbol
-            for symbol, _ in ranked[:limit]
+            for symbol, _
+            in ranked[:limit]
         ]
 
         print(
-            f"[BingX] TOP {len(symbols)} symbols: "
+            f"[BingX] "
+            f"TOP {len(symbols)} symbols: "
             f"{symbols}"
         )
 
         return symbols
 
     except Exception as exc:
+
         print(
-            f"[BingX] TOP symbols error: {exc}"
+            f"[BingX] "
+            f"TOP symbols error: "
+            f"{exc}"
         )
 
         return []
