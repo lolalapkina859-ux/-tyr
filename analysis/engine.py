@@ -810,10 +810,20 @@ def analyze(
     # FINAL FILTER
     # =====================================================
 
-    score = min(
-        int(score),
-        100,
-    )
+    # Если 15M структура не подтверждена,
+    # сигнал НИКОГДА не может стать 70+,
+    # даже после бонусов за R:R.
+    if not structure_confirmed:
+        score = min(
+            int(score),
+            69,
+        )
+
+    else:
+        score = min(
+            int(score),
+            100,
+        )
 
     return Signal(
         symbol=symbol,
