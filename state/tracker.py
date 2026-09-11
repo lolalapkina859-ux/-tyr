@@ -303,10 +303,9 @@ def _future_closed_candles(
     signal_candle_time: str,
 ):
     """
-    Only candles AFTER the candle that existed when the signal was sent.
-
-    This is the key freshness rule: no pre-notification TP/SL can ever
-    be credited to the signal.
+    Candles AFTER the last closed candle that existed when the signal
+    was sent. This may include the current live 15M candle, allowing
+    intrabar LIMIT / TP / SL touch detection on each scan.
     """
 
     if len(closed) == 0:
@@ -371,8 +370,12 @@ def update_symbol(
     ):
         return events
 
+    # Track touches intrabar too.
+    # BingX returns the current live 15M candle with running high/low,
+    # so LIMIT / TP / SL can be detected on the next 60s scan
+    # instead of waiting for the 15M candle to close.
     closed = (
-        df15.iloc[:-1]
+        df15
         .copy()
     )
 
