@@ -21,7 +21,7 @@ try:
 except Exception:
     pass
 
-PATH = DATA_DIR / "signal_stats.json"
+PATH = DATA_DIR / "signal_stats_v2.json"
 
 # 48 x 15m = 12 hours.
 # If a WAIT_FOR_RETRACE setup is not filled within this window,
