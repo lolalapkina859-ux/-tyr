@@ -316,10 +316,23 @@ def run():
                         .isoformat()
                     )
 
+                    live_row = (
+                        df15
+                        .iloc[-1]
+                    )
+
+                    live_snapshot = {
+                        "time": live_row["time"].isoformat(),
+                        "high": float(live_row["high"]),
+                        "low": float(live_row["low"]),
+                        "close": float(live_row["close"]),
+                    }
+
                     register_signal(
                         sig,
                         key,
                         closed_15m_time,
+                        live_snapshot,
                     )
 
                     state = mark_sent(
