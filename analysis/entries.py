@@ -579,10 +579,14 @@ def find_order_block(
 def overlap_zone(
     fvg: dict | None,
     ob: dict | None,
+    min_overlap_ratio: float = 0.05,
 ) -> dict | None:
     """
-    Intersection between a valid FVG and a valid OB.
-    This is our highest-priority retrace zone.
+    True overlap only.
+
+    A single touching price is NOT enough to call it FVG + OB.
+    The overlap must have real width and be at least a small
+    fraction of the FVG width.
     """
 
     if not fvg or not ob:
@@ -601,7 +605,23 @@ def overlap_zone(
         float(ob["high"]),
     )
 
-    if low > high:
+    overlap_width = (
+        high - low
+    )
+
+    fvg_width = max(
+        float(fvg["high"])
+        - float(fvg["low"]),
+        1e-12,
+    )
+
+    if overlap_width <= 0:
+        return None
+
+    if (
+        overlap_width / fvg_width
+        < min_overlap_ratio
+    ):
         return None
 
     return {
@@ -613,6 +633,7 @@ def overlap_zone(
             low,
             high,
         ),
+        "width": overlap_width,
     }
 
 
@@ -673,16 +694,40 @@ def build_retrace_entry(
         return {
             "side": side,
             "entry_type": "FVG + ORDER BLOCK",
+
+            # Show the REAL FVG range in Telegram.
+            # Entry itself still comes from the actual FVG/OB overlap.
             "zone_low": float(
-                overlap["low"]
+                fvg["low"]
             ),
             "zone_high": float(
-                overlap["high"]
+                fvg["high"]
             ),
             "entry": float(
                 overlap["mid"]
             ),
             "current_price": current_price,
+
+            # Extra diagnostics for later notifier/tracker upgrades.
+            "entry_zone_low": float(
+                overlap["low"]
+            ),
+            "entry_zone_high": float(
+                overlap["high"]
+            ),
+            "fvg_low": float(
+                fvg["low"]
+            ),
+            "fvg_high": float(
+                fvg["high"]
+            ),
+            "ob_low": float(
+                ob["low"]
+            ),
+            "ob_high": float(
+                ob["high"]
+            ),
+
             "fvg": fvg,
             "order_block": ob,
         }
