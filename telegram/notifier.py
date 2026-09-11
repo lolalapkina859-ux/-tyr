@@ -55,7 +55,6 @@ def level_description(level: str) -> str:
 # =========================================================
 
 def signal_status(score: int) -> str:
-
     if score >= 85:
         return "🔥 СИЛЬНЫЙ СИГНАЛ"
 
@@ -68,89 +67,28 @@ def signal_status(score: int) -> str:
     return "⚪ СЛАБЫЙ СЕТАП"
 
 
-# =========================================================
-# REASON TRANSLATION
-# =========================================================
-
-def translate_reason(reason: str) -> str:
-
-    text = reason
-
-    replacements = {
-        "liquidity sweep":
-            "снятие ликвидности",
-
-        "WaveTrend oversold":
-            "WaveTrend в перепроданности",
-
-        "WaveTrend overbought":
-            "WaveTrend в перекупленности",
-
-        "WaveTrend bullish cross":
-            "бычий разворот WaveTrend",
-
-        "WaveTrend bearish cross":
-            "медвежий разворот WaveTrend",
-
-        "momentum turning bullish":
-            "momentum разворачивается вверх",
-
-        "momentum turning bearish":
-            "momentum разворачивается вниз",
-
-        "Money Flow rising":
-            "Money Flow растёт",
-
-        "Money Flow falling":
-            "Money Flow снижается",
-
-        "bullish BOS / structure shift":
-            "бычий BOS / смена структуры",
-
-        "bearish BOS / structure shift":
-            "медвежий BOS / смена структуры",
-
-        "confirmation still weak":
-            "подтверждение пока слабое",
-
-        "TP1 R:R":
-            "R:R до TP1",
-
-        "TP2 R:R":
-            "R:R до TP2",
-    }
-
-    for eng, ru in replacements.items():
-        text = text.replace(
-            eng,
-            ru
+def entry_status_text(sig: Signal) -> tuple[str, str]:
+    if sig.entry_status == "ENTER_NOW":
+        return (
+            "✅ <b>ENTER NOW</b>",
+            "Цена находится в рабочей зоне входа.",
         )
 
-    return text
+    if sig.entry_status == "WAIT_FOR_RETRACE":
+        return (
+            "⏳ <b>WAIT FOR RETRACE</b>",
+            "Не догонять цену. Ждать возврат в зону входа.",
+        )
+
+    return (
+        f"ℹ️ <b>{sig.entry_status}</b>",
+        "Следовать плану только при актуальной цене.",
+    )
 
 
 # =========================================================
 # FIND REASONS
 # =========================================================
-
-def find_reason(
-    sig: Signal,
-    timeframe: str,
-    keyword: str
-) -> str | None:
-
-    for reason in sig.reasons:
-
-        lower = reason.lower()
-
-        if (
-            timeframe.lower() in lower
-            and keyword.lower() in lower
-        ):
-            return reason
-
-    return None
-
 
 def find_liquidity_level(
     sig: Signal,
@@ -210,12 +148,6 @@ def build_4h_context(
                 f"и вернулась обратно выше уровня."
             )
 
-            lines.append(
-                "Такое поведение больше похоже "
-                "на liquidity sweep, чем на "
-                "устойчивое продолжение движения вниз."
-            )
-
         else:
 
             lines.append(
@@ -224,20 +156,12 @@ def build_4h_context(
                 f"и вернулась обратно под уровень."
             )
 
-            lines.append(
-                "Такое поведение больше похоже "
-                "на liquidity sweep, чем на "
-                "устойчивое продолжение движения вверх."
-            )
-
     if (
         "4h wavetrend oversold"
         in reasons_text
     ):
         lines.append(
-            "WaveTrend находится в зоне "
-            "перепроданности — продавцы могут "
-            "начинать терять давление."
+            "WaveTrend на 4H в перепроданности."
         )
 
     if (
@@ -245,9 +169,7 @@ def build_4h_context(
         in reasons_text
     ):
         lines.append(
-            "WaveTrend находится в зоне "
-            "перекупленности — покупательский "
-            "импульс может ослабевать."
+            "WaveTrend на 4H в перекупленности."
         )
 
     if (
@@ -255,8 +177,7 @@ def build_4h_context(
         in reasons_text
     ):
         lines.append(
-            "Momentum на 4H начинает "
-            "разворачиваться вверх."
+            "Momentum на 4H разворачивается вверх."
         )
 
     if (
@@ -264,8 +185,7 @@ def build_4h_context(
         in reasons_text
     ):
         lines.append(
-            "Momentum на 4H начинает "
-            "разворачиваться вниз."
+            "Momentum на 4H разворачивается вниз."
         )
 
     if (
@@ -273,8 +193,7 @@ def build_4h_context(
         in reasons_text
     ):
         lines.append(
-            "Money Flow на 4H растёт — "
-            "покупательское давление усиливается."
+            "Money Flow на 4H растёт."
         )
 
     if (
@@ -282,15 +201,12 @@ def build_4h_context(
         in reasons_text
     ):
         lines.append(
-            "Money Flow на 4H снижается — "
-            "покупательское давление ослабевает."
+            "Money Flow на 4H снижается."
         )
 
     if not lines:
-
         lines.append(
-            "На 4H есть реакция цены "
-            "на ключевую ликвидность."
+            "На 4H есть реакция на ключевую ликвидность."
         )
 
     return lines
@@ -323,18 +239,14 @@ def build_15m_confirmation(
         )
 
         if sig.side == "LONG":
-
             lines.append(
-                f"На 15M снята локальная "
-                f"ликвидность ниже "
+                f"На 15M снята локальная ликвидность ниже "
                 f"<b>{level}</b> — {desc}."
             )
 
         else:
-
             lines.append(
-                f"На 15M снята локальная "
-                f"ликвидность выше "
+                f"На 15M снята локальная ликвидность выше "
                 f"<b>{level}</b> — {desc}."
             )
 
@@ -343,8 +255,7 @@ def build_15m_confirmation(
         in reasons_text
     ):
         lines.append(
-            "Есть bullish BOS / смена структуры — "
-            "рынок начинает подтверждать LONG."
+            "Есть bullish BOS / смена структуры."
         )
 
     if (
@@ -352,8 +263,7 @@ def build_15m_confirmation(
         in reasons_text
     ):
         lines.append(
-            "Есть bearish BOS / смена структуры — "
-            "рынок начинает подтверждать SHORT."
+            "Есть bearish BOS / смена структуры."
         )
 
     if (
@@ -393,8 +303,7 @@ def build_15m_confirmation(
         in reasons_text
     ):
         lines.append(
-            "Money Flow растёт — "
-            "подтверждается давление покупателей."
+            "Money Flow растёт."
         )
 
     if (
@@ -402,15 +311,12 @@ def build_15m_confirmation(
         in reasons_text
     ):
         lines.append(
-            "Money Flow снижается — "
-            "покупатели теряют силу."
+            "Money Flow снижается."
         )
 
     if not lines:
-
         lines.append(
-            "На 15M есть подтверждение "
-            "реакции после снятия ликвидности."
+            "На 15M есть подтверждение реакции после liquidity sweep."
         )
 
     return lines
@@ -425,6 +331,11 @@ def build_conclusion(
 ) -> list[str]:
 
     lines = []
+
+    reasons_text = (
+        " ".join(sig.reasons)
+        .lower()
+    )
 
     has_4h_liquidity = (
         find_liquidity_level(
@@ -442,11 +353,6 @@ def build_conclusion(
         is not None
     )
 
-    reasons_text = (
-        " ".join(sig.reasons)
-        .lower()
-    )
-
     structure_confirmed = (
         "15m bullish bos"
         in reasons_text
@@ -460,44 +366,30 @@ def build_conclusion(
         and has_15m_liquidity
         and structure_confirmed
     ):
-
         lines.append(
-            "HTF liquidity и LTF confirmation "
-            "совпали — это усиливает сценарий."
+            "HTF liquidity и 15M confirmation совпали."
         )
 
     elif (
         has_4h_liquidity
         and structure_confirmed
     ):
-
         lines.append(
-            "4H liquidity подтверждается "
-            "сменой структуры на 15M."
+            "4H liquidity подтверждается сменой структуры на 15M."
         )
 
     elif has_15m_liquidity:
-
         lines.append(
-            "Сигнал сформирован после "
-            "локального sweep и подтверждения "
-            "на 15M."
+            "Сигнал сформирован после локального sweep и подтверждения на 15M."
         )
 
-    if sig.side == "LONG":
-
+    if sig.entry_status == "WAIT_FOR_RETRACE":
         lines.append(
-            "Пока структура удерживается выше "
-            "уровня отмены сценария, "
-            "приоритет остаётся за LONG."
+            "Главное сейчас — не догонять рынок, а ждать возврат в FVG/Order Block."
         )
-
     else:
-
         lines.append(
-            "Пока структура удерживается ниже "
-            "уровня отмены сценария, "
-            "приоритет остаётся за SHORT."
+            "Цена уже находится в рабочей зоне входа."
         )
 
     return lines
@@ -521,6 +413,8 @@ def build_message(
         sig.score
     )
 
+    entry_status, entry_note = entry_status_text(sig)
+
     risk = abs(
         sig.entry - sig.sl
     )
@@ -530,6 +424,15 @@ def build_message(
         "",
         status,
         f"⭐ <b>Рейтинг: {sig.score}/100</b>",
+        "",
+        entry_status,
+        entry_note,
+        "",
+        f"💵 Current: <b>{fmt_price(sig.current_price)}</b>",
+        f"📦 Entry type: <b>{sig.entry_type}</b>",
+        f"📍 Zone: <b>{fmt_price(sig.zone_low)} — {fmt_price(sig.zone_high)}</b>",
+        f"🎯 LIMIT: <b>{fmt_price(sig.entry)}</b>",
+        f"🛑 SL: <b>{fmt_price(sig.sl)}</b>",
         "",
     ]
 
@@ -565,20 +468,13 @@ def build_message(
         )
 
     # =====================================================
-    # PLAN
+    # TARGETS + R:R
     # =====================================================
 
     lines += [
         "",
-        "📍 <b>ТОРГОВЫЙ ПЛАН</b>",
-        f"Entry: <b>{fmt_price(sig.entry)}</b>",
-        f"SL: <b>{fmt_price(sig.sl)}</b>",
-        "",
+        "🎯 <b>ЦЕЛИ</b>",
     ]
-
-    # =====================================================
-    # TARGETS + R:R
-    # =====================================================
 
     for i, (
         price,
@@ -609,14 +505,13 @@ def build_message(
         )
 
         lines.append(
-            f"🎯 <b>TP{i}:</b> "
-            f"{fmt_price(price)} "
-            f"<i>({name})</i>"
+            f"TP{i}: <b>{fmt_price(price)}</b> "
+            f"<i>({name})</i> "
+            f"• R:R <b>1:{rr:.2f}</b>"
         )
 
         lines.append(
-            f"   ↳ R:R <b>1:{rr:.2f}</b> "
-            f"• {description}"
+            f"   ↳ {description}"
         )
 
     # =====================================================
@@ -625,7 +520,7 @@ def build_message(
 
     lines += [
         "",
-        "🧠 <b>ПОЧЕМУ ЭТОТ СИГНАЛ</b>",
+        "🧠 <b>ЛОГИКА СИГНАЛА</b>",
     ]
 
     for text in build_conclusion(
@@ -648,7 +543,7 @@ def build_message(
         invalid_text = (
             f"Закрепление 15M ниже "
             f"<b>{invalid_price}</b> "
-            f"ломает текущий LONG-сценарий."
+            f"ломает LONG-сценарий."
         )
 
     else:
@@ -656,7 +551,7 @@ def build_message(
         invalid_text = (
             f"Закрепление 15M выше "
             f"<b>{invalid_price}</b> "
-            f"ломает текущий SHORT-сценарий."
+            f"ломает SHORT-сценарий."
         )
 
     lines += [
@@ -665,7 +560,7 @@ def build_message(
         invalid_text,
         "",
         "👁 <b>TRADE VISION 24/7</b>",
-        "<i>Liquidity → Reaction → Confirmation</i>",
+        "<i>Liquidity → Reaction → BOS → FVG/OB → Retest → Entry</i>",
         "",
         "⚠️ Технический сценарий. Контролируй риск.",
     ]
