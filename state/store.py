@@ -1,27 +1,93 @@
 import json
+import os
 from pathlib import Path
 
-PATH = Path("state.json")
+
+DATA_DIR = Path(
+    os.getenv(
+        "RAILWAY_VOLUME_MOUNT_PATH",
+        "/data",
+    )
+)
+
+try:
+    DATA_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+except Exception:
+    pass
+
+PATH = DATA_DIR / "signal_state.json"
+
 
 def load_state():
     if not PATH.exists():
         return {}
+
     try:
-        return json.loads(PATH.read_text())
-    except Exception:
+        data = json.loads(
+            PATH.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        if isinstance(data, dict):
+            return data
+
         return {}
 
+    except Exception as exc:
+        print(
+            f"[STATE] load error: {exc}"
+        )
+        return {}
+
+
 def save_state(state):
-    PATH.write_text(json.dumps(state, indent=2))
+    try:
+        PATH.write_text(
+            json.dumps(
+                state,
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
-def already_sent(state, key: str) -> bool:
-    return bool(state.get(key))
+    except Exception as exc:
+        print(
+            f"[STATE] save error: {exc}"
+        )
 
-def mark_sent(state, key: str):
+
+def already_sent(
+    state,
+    key: str,
+) -> bool:
+    return bool(
+        state.get(key)
+    )
+
+
+def mark_sent(
+    state,
+    key: str,
+):
     state[key] = True
-    # Keep state reasonably small on a long-running Railway worker.
+
     if len(state) > 5000:
-        keys = list(state.keys())[-3000:]
-        state = {k: state[k] for k in keys}
-    save_state(state)
+        keys = list(
+            state.keys()
+        )[-3000:]
+
+        state = {
+            k: state[k]
+            for k in keys
+        }
+
+    save_state(
+        state
+    )
+
     return state
