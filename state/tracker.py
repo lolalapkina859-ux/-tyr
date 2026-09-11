@@ -1,37 +1,53 @@
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 
-# Если позже подключим Railway Volume на /data,
-# статистика будет сохраняться между redeploy.
-DATA_DIR = (
-    Path("/data")
-    if Path("/data").exists()
-    else Path(".")
+
+DATA_DIR = Path(
+    os.getenv(
+        "RAILWAY_VOLUME_MOUNT_PATH",
+        "/data",
+    )
 )
 
+try:
+    DATA_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+except Exception:
+    pass
+
 PATH = DATA_DIR / "signal_stats.json"
+
+# 48 x 15m = 12 hours.
+# If a WAIT_FOR_RETRACE setup is not filled within this window,
+# it is treated as expired rather than as an open trade.
+PENDING_EXPIRY_BARS = 48
+
+
+def _empty_data() -> dict:
+    return {
+        "signals": []
+    }
 
 
 def _load() -> dict:
     if not PATH.exists():
-        return {
-            "signals": []
-        }
+        return _empty_data()
 
     try:
         data = json.loads(
-            PATH.read_text()
+            PATH.read_text(
+                encoding="utf-8"
+            )
         )
 
-        if not isinstance(
-            data,
-            dict
-        ):
-            return {
-                "signals": []
-            }
+        if not isinstance(data, dict):
+            return _empty_data()
 
         data.setdefault(
             "signals",
@@ -40,10 +56,11 @@ def _load() -> dict:
 
         return data
 
-    except Exception:
-        return {
-            "signals": []
-        }
+    except Exception as exc:
+        print(
+            f"[TRACKER] load error: {exc}"
+        )
+        return _empty_data()
 
 
 def _save(
@@ -52,7 +69,7 @@ def _save(
 
     PATH.parent.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     PATH.write_text(
@@ -60,8 +77,41 @@ def _save(
             data,
             indent=2,
             ensure_ascii=False,
-        )
+        ),
+        encoding="utf-8",
     )
+
+
+def _iso(value) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+
+    return str(value)
+
+
+def _sorted_targets(
+    sig,
+) -> list[dict]:
+
+    items = [
+        {
+            "price": float(price),
+            "name": name,
+        }
+        for price, name
+        in sig.targets
+    ]
+
+    reverse = (
+        sig.side == "SHORT"
+    )
+
+    items.sort(
+        key=lambda x: x["price"],
+        reverse=reverse,
+    )
+
+    return items
 
 
 # =========================================================
@@ -76,7 +126,6 @@ def register_signal(
 
     data = _load()
 
-    # Не записываем один и тот же сигнал повторно.
     for item in data["signals"]:
 
         if (
@@ -90,6 +139,25 @@ def register_signal(
         - float(sig.sl)
     )
 
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    entry_status = getattr(
+        sig,
+        "entry_status",
+        "ENTER_NOW",
+    )
+
+    # WAIT_FOR_RETRACE is not a trade yet.
+    # ENTER_NOW is treated as filled at notification time.
+    if entry_status == "WAIT_FOR_RETRACE":
+        status = "PENDING"
+        entry_filled_at = None
+    else:
+        status = "OPEN"
+        entry_filled_at = now
+
     item = {
         "key": signal_key,
 
@@ -97,31 +165,57 @@ def register_signal(
         "side": sig.side,
         "score": int(sig.score),
 
+        "entry_status": entry_status,
+        "entry_type": getattr(
+            sig,
+            "entry_type",
+            "UNKNOWN",
+        ),
+
+        "zone_low": float(
+            getattr(
+                sig,
+                "zone_low",
+                sig.entry,
+            )
+        ),
+
+        "zone_high": float(
+            getattr(
+                sig,
+                "zone_high",
+                sig.entry,
+            )
+        ),
+
+        "current_price_at_signal": float(
+            getattr(
+                sig,
+                "current_price",
+                sig.entry,
+            )
+        ),
+
         "entry": float(sig.entry),
         "sl": float(sig.sl),
 
-        "targets": [
-            {
-                "price": float(price),
-                "name": name,
-            }
-            for price, name
-            in sig.targets
-        ],
+        "targets": _sorted_targets(
+            sig
+        ),
 
         "reasons": list(
             sig.reasons
         ),
 
-        "signal_candle_time":
-            candle_time,
+        # Last CLOSED 15m candle that existed when signal was sent.
+        # We never evaluate that candle for result tracking.
+        "signal_candle_time": candle_time,
 
-        "created_at":
-            datetime.now(
-                timezone.utc
-            ).isoformat(),
+        # Real notification/registration time.
+        "created_at": now,
 
-        "status": "OPEN",
+        "status": status,
+        "entry_filled_at": entry_filled_at,
 
         "highest_tp": 0,
 
@@ -132,6 +226,9 @@ def register_signal(
 
         "closed_at": None,
         "result_r": None,
+
+        "expired_at": None,
+        "ambiguous_at": None,
     }
 
     data["signals"].append(
@@ -158,7 +255,6 @@ def _r_multiple(
         return 0.0
 
     if side == "LONG":
-
         return (
             price - entry
         ) / risk
@@ -166,6 +262,93 @@ def _r_multiple(
     return (
         entry - price
     ) / risk
+
+
+def _entry_touched(
+    entry: float,
+    high: float,
+    low: float,
+) -> bool:
+    return (
+        low <= entry <= high
+    )
+
+
+def _sl_hit(
+    side: str,
+    sl: float,
+    high: float,
+    low: float,
+) -> bool:
+    if side == "LONG":
+        return low <= sl
+
+    return high >= sl
+
+
+def _target_hit(
+    side: str,
+    tp: float,
+    high: float,
+    low: float,
+) -> bool:
+    if side == "LONG":
+        return high >= tp
+
+    return low <= tp
+
+
+def _future_closed_candles(
+    closed,
+    signal_candle_time: str,
+):
+    """
+    Only candles AFTER the candle that existed when the signal was sent.
+
+    This is the key freshness rule: no pre-notification TP/SL can ever
+    be credited to the signal.
+    """
+
+    if len(closed) == 0:
+        return closed
+
+    try:
+        signal_ts = pd.to_datetime(
+            signal_candle_time,
+            utc=True,
+        )
+
+        times = pd.to_datetime(
+            closed["time"],
+            utc=True,
+        )
+
+        return closed[
+            times > signal_ts
+        ]
+
+    except Exception:
+        # Conservative fallback: skip the oldest candidate candle.
+        return closed.iloc[-1:0]
+
+
+def _close_ambiguous(
+    item: dict,
+    candle_time: str,
+    events: list[dict],
+):
+    item["status"] = "AMBIGUOUS"
+    item["closed_at"] = candle_time
+    item["ambiguous_at"] = candle_time
+    item["result_r"] = None
+
+    events.append({
+        "type": "AMBIGUOUS",
+        "symbol": item["symbol"],
+        "side": item["side"],
+        "score": item["score"],
+        "key": item["key"],
+    })
 
 
 # =========================================================
@@ -177,18 +360,9 @@ def update_symbol(
     df15,
 ) -> list[dict]:
 
-    """
-    Проверяет все OPEN сигналы по символу.
-
-    Возвращает события:
-    TP_HIT
-    SL_HIT
-    """
-
     data = _load()
 
     events = []
-
     changed = False
 
     if (
@@ -197,9 +371,9 @@ def update_symbol(
     ):
         return events
 
-    # Только закрытые свечи.
     closed = (
         df15.iloc[:-1]
+        .copy()
     )
 
     for item in data["signals"]:
@@ -210,30 +384,31 @@ def update_symbol(
         ):
             continue
 
-        if (
-            item.get("status")
-            != "OPEN"
+        status = item.get(
+            "status",
+            "OPEN",
+        )
+
+        # Migration for old tracker rows.
+        if status == "OPEN":
+            item.setdefault(
+                "entry_filled_at",
+                item.get("created_at"),
+            )
+
+        if status not in (
+            "PENDING",
+            "OPEN",
         ):
             continue
 
-        # -----------------------------------------
-        # Берём свечи после появления сигнала
-        # -----------------------------------------
-
-        start = item.get(
-            "signal_candle_time"
+        candles = _future_closed_candles(
+            closed,
+            item.get(
+                "signal_candle_time",
+                "",
+            ),
         )
-
-        try:
-
-            candles = closed[
-                closed["time"]
-                >= start
-            ]
-
-        except Exception:
-
-            candles = closed
 
         if len(candles) == 0:
             continue
@@ -255,80 +430,97 @@ def update_symbol(
 
         side = item["side"]
 
-        # -----------------------------------------
-        # MFE / MAE
-        # -----------------------------------------
+        # =================================================
+        # PENDING: WAIT FOR ACTUAL ENTRY
+        # =================================================
 
-        max_high = float(
-            candles["high"].max()
-        )
+        if status == "PENDING":
 
-        min_low = float(
-            candles["low"].min()
-        )
+            # Expire stale limit/retrace setup.
+            if len(candles) >= PENDING_EXPIRY_BARS:
 
-        favorable_price = (
-            max_high
-            if side == "LONG"
-            else min_low
-        )
-
-        adverse_price = (
-            min_low
-            if side == "LONG"
-            else max_high
-        )
-
-        max_r = _r_multiple(
-            side,
-            entry,
-            favorable_price,
-            risk,
-        )
-
-        adverse_r = _r_multiple(
-            side,
-            entry,
-            adverse_price,
-            risk,
-        )
-
-        item["max_r"] = max(
-            float(
-                item.get(
-                    "max_r",
-                    0.0
+                last_time = _iso(
+                    candles.iloc[
+                        PENDING_EXPIRY_BARS - 1
+                    ]["time"]
                 )
-            ),
-            float(max_r),
-        )
 
-        item[
-            "max_adverse_r"
-        ] = min(
-            float(
-                item.get(
-                    "max_adverse_r",
-                    0.0
+                item["status"] = "EXPIRED"
+                item["expired_at"] = last_time
+                item["closed_at"] = last_time
+                item["result_r"] = None
+
+                events.append({
+                    "type": "EXPIRED",
+                    "symbol": symbol,
+                    "side": side,
+                    "key": item["key"],
+                })
+
+                changed = True
+                continue
+
+            fill_index = None
+
+            for idx, row in candles.iterrows():
+
+                high = float(
+                    row["high"]
                 )
-            ),
-            float(adverse_r),
-        )
+
+                low = float(
+                    row["low"]
+                )
+
+                if _entry_touched(
+                    entry,
+                    high,
+                    low,
+                ):
+                    fill_index = idx
+                    fill_time = _iso(
+                        row["time"]
+                    )
+
+                    item["status"] = "OPEN"
+                    item["entry_filled_at"] = fill_time
+
+                    events.append({
+                        "type": "ENTRY_FILLED",
+                        "symbol": symbol,
+                        "side": side,
+                        "price": entry,
+                        "key": item["key"],
+                    })
+
+                    changed = True
+                    break
+
+            if fill_index is None:
+                continue
+
+            # From here we evaluate only from the fill candle onward.
+            candles = candles.loc[
+                fill_index:
+            ]
+
+        # =================================================
+        # OPEN: evaluate MFE/MAE + TP/SL in chronological order
+        # =================================================
 
         highest_tp = int(
             item.get(
                 "highest_tp",
-                0
+                0,
             )
         )
 
-        # -----------------------------------------
-        # Проверяем свечи по порядку
-        # -----------------------------------------
+        targets = item.get(
+            "targets",
+            [],
+        )
 
-        for _, row in (
-            candles.iterrows()
-        ):
+        for _, row in candles.iterrows():
 
             high = float(
                 row["high"]
@@ -338,71 +530,68 @@ def update_symbol(
                 row["low"]
             )
 
-            candle_time = (
+            candle_time = _iso(
                 row["time"]
-                .isoformat()
             )
 
-            # =====================================
-            # STOP LOSS
-            # =====================================
-
-            sl_hit = (
-                low <= sl
+            # MFE / MAE only AFTER entry is active.
+            favorable_price = (
+                high
                 if side == "LONG"
-                else high >= sl
+                else low
             )
 
-            # Если SL и TP коснулись внутри
-            # одной 15M свечи, считаем
-            # консервативно: сначала SL.
-            if sl_hit:
+            adverse_price = (
+                low
+                if side == "LONG"
+                else high
+            )
 
-                item[
-                    "status"
-                ] = "CLOSED"
-
-                item[
-                    "closed_at"
-                ] = candle_time
-
-                item[
-                    "result_r"
-                ] = -1.0
-
-                events.append({
-                    "type":
-                        "SL_HIT",
-
-                    "symbol":
-                        symbol,
-
-                    "side":
+            item["max_r"] = max(
+                float(
+                    item.get(
+                        "max_r",
+                        0.0,
+                    )
+                ),
+                float(
+                    _r_multiple(
                         side,
+                        entry,
+                        favorable_price,
+                        risk,
+                    )
+                ),
+            )
 
-                    "score":
-                        item["score"],
+            item["max_adverse_r"] = min(
+                float(
+                    item.get(
+                        "max_adverse_r",
+                        0.0,
+                    )
+                ),
+                float(
+                    _r_multiple(
+                        side,
+                        entry,
+                        adverse_price,
+                        risk,
+                    )
+                ),
+            )
 
-                    "result_r":
-                        -1.0,
+            sl_touched = _sl_hit(
+                side,
+                sl,
+                high,
+                low,
+            )
 
-                    "key":
-                        item["key"],
-                })
-
-                changed = True
-
-                break
-
-            # =====================================
-            # TAKE PROFITS
-            # =====================================
+            newly_hit = []
 
             for idx, target in enumerate(
-                item.get(
-                    "targets",
-                    []
-                ),
+                targets,
                 start=1,
             ):
 
@@ -413,62 +602,126 @@ def update_symbol(
                     target["price"]
                 )
 
-                tp_hit = (
-                    high >= tp
-                    if side == "LONG"
-                    else low <= tp
-                )
-
-                if not tp_hit:
-                    continue
-
-                highest_tp = idx
-
-                item[
-                    "highest_tp"
-                ] = idx
-
-                rr = (
-                    abs(
-                        tp - entry
+                if _target_hit(
+                    side,
+                    tp,
+                    high,
+                    low,
+                ):
+                    newly_hit.append(
+                        idx
                     )
-                    / risk
-                    if risk > 0
-                    else 0.0
+
+            # If the same 15m candle hits SL and one or more TPs,
+            # intrabar order is unknowable -> AMBIGUOUS.
+            if (
+                sl_touched
+                and newly_hit
+            ):
+                _close_ambiguous(
+                    item,
+                    candle_time,
+                    events,
                 )
+
+                changed = True
+                break
+
+            if sl_touched:
+
+                item["status"] = "CLOSED"
+                item["closed_at"] = candle_time
+                item["result_r"] = -1.0
 
                 events.append({
-                    "type":
-                        "TP_HIT",
-
-                    "tp":
-                        idx,
-
-                    "symbol":
-                        symbol,
-
-                    "side":
-                        side,
-
-                    "score":
-                        item["score"],
-
-                    "rr":
-                        rr,
-
-                    "price":
-                        tp,
-
-                    "key":
-                        item["key"],
+                    "type": "SL_HIT",
+                    "symbol": symbol,
+                    "side": side,
+                    "score": item["score"],
+                    "result_r": -1.0,
+                    "key": item["key"],
                 })
 
                 changed = True
+                break
 
-        changed = True
+            if newly_hit:
+
+                for idx in newly_hit:
+                    target = targets[
+                        idx - 1
+                    ]
+
+                    tp = float(
+                        target["price"]
+                    )
+
+                    highest_tp = max(
+                        highest_tp,
+                        idx,
+                    )
+
+                    item[
+                        "highest_tp"
+                    ] = highest_tp
+
+                    rr = (
+                        abs(
+                            tp - entry
+                        )
+                        / risk
+                        if risk > 0
+                        else 0.0
+                    )
+
+                    events.append({
+                        "type": "TP_HIT",
+                        "tp": idx,
+                        "symbol": symbol,
+                        "side": side,
+                        "score": item["score"],
+                        "rr": rr,
+                        "price": tp,
+                        "key": item["key"],
+                    })
+
+                    changed = True
+
+                # Final TP closes the trade.
+                if (
+                    targets
+                    and highest_tp
+                    >= len(targets)
+                ):
+                    final_tp = float(
+                        targets[-1]["price"]
+                    )
+
+                    final_rr = (
+                        abs(
+                            final_tp - entry
+                        )
+                        / risk
+                        if risk > 0
+                        else 0.0
+                    )
+
+                    item["status"] = "CLOSED"
+                    item["closed_at"] = candle_time
+                    item["result_r"] = final_rr
+
+                    events.append({
+                        "type": "CLOSED_TP",
+                        "symbol": symbol,
+                        "side": side,
+                        "result_r": final_rr,
+                        "key": item["key"],
+                    })
+
+                    changed = True
+                    break
 
     if changed:
-
         _save(
             data
         )
@@ -486,8 +739,22 @@ def get_summary() -> dict:
 
     signals = data.get(
         "signals",
-        []
+        [],
     )
+
+    pending = [
+        x
+        for x in signals
+        if x.get("status")
+        == "PENDING"
+    ]
+
+    open_signals = [
+        x
+        for x in signals
+        if x.get("status")
+        == "OPEN"
+    ]
 
     closed = [
         x
@@ -496,11 +763,26 @@ def get_summary() -> dict:
         == "CLOSED"
     ]
 
-    open_signals = [
+    expired = [
         x
         for x in signals
         if x.get("status")
-        == "OPEN"
+        == "EXPIRED"
+    ]
+
+    ambiguous = [
+        x
+        for x in signals
+        if x.get("status")
+        == "AMBIGUOUS"
+    ]
+
+    filled = [
+        x
+        for x in signals
+        if x.get(
+            "entry_filled_at"
+        )
     ]
 
     losses = sum(
@@ -512,72 +794,57 @@ def get_summary() -> dict:
         ) < 0
     )
 
-    tp1 = sum(
+    wins = sum(
         1
-        for x in signals
-        if int(
-            x.get(
-                "highest_tp",
-                0
-            )
-        ) >= 1
+        for x in closed
+        if float(
+            x.get("result_r")
+            or 0
+        ) > 0
     )
 
-    tp2 = sum(
-        1
-        for x in signals
-        if int(
-            x.get(
-                "highest_tp",
-                0
-            )
-        ) >= 2
+    def tp_count(level: int) -> int:
+        return sum(
+            1
+            for x in signals
+            if int(
+                x.get(
+                    "highest_tp",
+                    0,
+                )
+            ) >= level
+        )
+
+    closed_decided = (
+        wins
+        + losses
     )
 
-    tp3 = sum(
-        1
-        for x in signals
-        if int(
-            x.get(
-                "highest_tp",
-                0
-            )
-        ) >= 3
-    )
-
-    tp4 = sum(
-        1
-        for x in signals
-        if int(
-            x.get(
-                "highest_tp",
-                0
-            )
-        ) >= 4
+    win_rate = (
+        wins
+        / closed_decided
+        * 100.0
+        if closed_decided > 0
+        else 0.0
     )
 
     return {
-        "total":
-            len(signals),
+        "total": len(signals),
 
-        "open":
-            len(open_signals),
+        "pending": len(pending),
+        "open": len(open_signals),
+        "closed": len(closed),
+        "expired": len(expired),
+        "ambiguous": len(ambiguous),
 
-        "closed":
-            len(closed),
+        "filled": len(filled),
 
-        "losses":
-            losses,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
 
-        "tp1":
-            tp1,
-
-        "tp2":
-            tp2,
-
-        "tp3":
-            tp3,
-
-        "tp4":
-            tp4,
+        "tp1": tp_count(1),
+        "tp2": tp_count(2),
+        "tp3": tp_count(3),
+        "tp4": tp_count(4),
     }
