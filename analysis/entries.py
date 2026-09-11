@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pandas as pd
 
 
@@ -9,11 +10,11 @@ import pandas as pd
 
 def _closed(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Работаем только с закрытыми свечами.
-    Последняя строка считается текущей незакрытой свечой.
+    Work only with closed candles.
+    The last dataframe row is treated as the live candle.
     """
-    if len(df) < 2:
-        return df.copy()
+    if df is None or len(df) < 2:
+        return pd.DataFrame() if df is None else df.copy()
 
     return (
         df.iloc[:-1]
@@ -22,109 +23,211 @@ def _closed(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _atr_series(df: pd.DataFrame, length: int = 55) -> pd.Series:
+    """
+    Use pre-calculated ATR when available.
+    Otherwise calculate Wilder-like rolling TR mean locally.
+    """
+    if "atr" in df.columns:
+        atr_values = pd.to_numeric(
+            df["atr"],
+            errors="coerce",
+        )
+        if atr_values.notna().any():
+            return atr_values
+
+    high = pd.to_numeric(df["high"], errors="coerce")
+    low = pd.to_numeric(df["low"], errors="coerce")
+    close = pd.to_numeric(df["close"], errors="coerce")
+
+    prev_close = close.shift(1)
+
+    tr = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+
+    return tr.rolling(
+        length,
+        min_periods=max(5, length // 4),
+    ).mean()
+
+
+def _zone_mid(low: float, high: float) -> float:
+    return (float(low) + float(high)) / 2.0
+
+
 # =========================================================
-# FAIR VALUE GAPS
+# LUXALGO-STYLE FAIR VALUE GAPS
 # =========================================================
 
 def find_fvgs(
     df: pd.DataFrame,
-    lookback: int = 60,
+    lookback: int = 80,
+    auto_threshold: bool = True,
 ) -> list[dict]:
-
     """
-    Bullish FVG:
-        high candle[i-2] < low candle[i]
+    LuxAlgo-style FVG logic adapted for our 15M dataframe.
 
-        zone:
-        high[i-2] -> low[i]
+    Bullish:
+        current low > high[2]
+        previous candle close > high[2]
+        previous candle body/displacement > dynamic threshold
 
-    Bearish FVG:
-        low candle[i-2] > high candle[i]
+    Bearish:
+        current high < low[2]
+        previous candle close < low[2]
+        negative previous candle displacement > threshold
 
-        zone:
-        high[i] -> low[i-2]
+    Old / already invalidated FVGs are discarded.
     """
 
     d = _closed(df)
 
-    if len(d) < 3:
+    if len(d) < 5:
         return []
+
+    open_ = pd.to_numeric(d["open"], errors="coerce")
+    close = pd.to_numeric(d["close"], errors="coerce")
+
+    # Relative body delta. The original LuxAlgo threshold is based on a
+    # cumulative average of absolute candle delta and multiplied by 2.
+    body_delta = (
+        (close - open_)
+        / open_.replace(0, math.nan)
+    )
+
+    if auto_threshold:
+        threshold = (
+            body_delta.abs()
+            .expanding(min_periods=3)
+            .mean()
+            * 2.0
+        )
+    else:
+        threshold = pd.Series(
+            0.0,
+            index=d.index,
+        )
 
     start = max(
         2,
         len(d) - lookback,
     )
 
-    fvgs = []
+    fvgs: list[dict] = []
 
-    for i in range(
-        start,
-        len(d),
-    ):
-
+    for i in range(start, len(d)):
         left = d.iloc[i - 2]
         middle = d.iloc[i - 1]
         right = d.iloc[i]
 
-        # =============================================
+        left_high = float(left["high"])
+        left_low = float(left["low"])
+
+        middle_close = float(middle["close"])
+        middle_open = float(middle["open"])
+
+        right_high = float(right["high"])
+        right_low = float(right["low"])
+
+        if middle_open == 0:
+            continue
+
+        delta = (
+            middle_close - middle_open
+        ) / middle_open
+
+        dynamic_threshold = float(
+            threshold.iloc[i - 1]
+        )
+
+        if math.isnan(dynamic_threshold):
+            dynamic_threshold = 0.0
+
+        # -------------------------------------------------
         # BULLISH FVG
-        # =============================================
+        # -------------------------------------------------
 
-        if float(left["high"]) < float(right["low"]):
+        bullish = (
+            right_low > left_high
+            and middle_close > left_high
+            and (
+                (not auto_threshold)
+                or delta > dynamic_threshold
+            )
+        )
 
-            low = float(
-                left["high"]
+        if bullish:
+            low = left_high
+            high = right_low
+
+            # LuxAlgo removes bullish FVG when price trades
+            # below its bottom.
+            future = d.iloc[i + 1:]
+
+            invalidated = (
+                not future.empty
+                and float(future["low"].min()) < low
             )
 
-            high = float(
-                right["low"]
-            )
+            if not invalidated:
+                fvgs.append(
+                    {
+                        "side": "LONG",
+                        "type": "FVG",
+                        "low": low,
+                        "high": high,
+                        "mid": _zone_mid(low, high),
+                        "time": right["time"],
+                        "index": i,
+                        "displacement": delta,
+                        "threshold": dynamic_threshold,
+                    }
+                )
 
-            fvgs.append({
-                "side": "LONG",
-                "type": "FVG",
-                "low": low,
-                "high": high,
-                "mid": (
-                    low + high
-                ) / 2.0,
-                "time": right["time"],
-                "index": i,
-                "displacement_close":
-                    float(
-                        middle["close"]
-                    ),
-            })
-
-        # =============================================
+        # -------------------------------------------------
         # BEARISH FVG
-        # =============================================
+        # -------------------------------------------------
 
-        if float(left["low"]) > float(right["high"]):
+        bearish = (
+            right_high < left_low
+            and middle_close < left_low
+            and (
+                (not auto_threshold)
+                or (-delta) > dynamic_threshold
+            )
+        )
 
-            low = float(
-                right["high"]
+        if bearish:
+            low = right_high
+            high = left_low
+
+            future = d.iloc[i + 1:]
+
+            invalidated = (
+                not future.empty
+                and float(future["high"].max()) > high
             )
 
-            high = float(
-                left["low"]
-            )
-
-            fvgs.append({
-                "side": "SHORT",
-                "type": "FVG",
-                "low": low,
-                "high": high,
-                "mid": (
-                    low + high
-                ) / 2.0,
-                "time": right["time"],
-                "index": i,
-                "displacement_close":
-                    float(
-                        middle["close"]
-                    ),
-            })
+            if not invalidated:
+                fvgs.append(
+                    {
+                        "side": "SHORT",
+                        "type": "FVG",
+                        "low": low,
+                        "high": high,
+                        "mid": _zone_mid(low, high),
+                        "time": right["time"],
+                        "index": i,
+                        "displacement": -delta,
+                        "threshold": dynamic_threshold,
+                    }
+                )
 
     return fvgs
 
@@ -133,181 +236,338 @@ def latest_fvg(
     df: pd.DataFrame,
     side: str,
     current_price: float,
-    lookback: int = 60,
+    lookback: int = 80,
 ) -> dict | None:
 
-    fvgs = find_fvgs(
-        df,
-        lookback,
-    )
-
     matching = [
-        fvg
-        for fvg in fvgs
-        if fvg["side"] == side
+        item
+        for item in find_fvgs(
+            df,
+            lookback=lookback,
+            auto_threshold=True,
+        )
+        if item["side"] == side
     ]
 
     if not matching:
         return None
 
-    # Берём самый свежий FVG,
-    # который находится со стороны нормального retrace.
-    for fvg in reversed(
-        matching
-    ):
+    for fvg in reversed(matching):
 
         if side == "LONG":
-
-            # Для LONG FVG должен находиться
-            # ниже либо вокруг текущей цены.
-            if fvg["low"] <= current_price:
+            # A long retrace FVG should normally be at/below price.
+            if float(fvg["low"]) <= current_price:
                 return fvg
 
         else:
-
-            # Для SHORT FVG должен находиться
-            # выше либо вокруг текущей цены.
-            if fvg["high"] >= current_price:
+            # A short retrace FVG should normally be at/above price.
+            if float(fvg["high"]) >= current_price:
                 return fvg
 
     return None
 
 
 # =========================================================
-# ORDER BLOCK
+# STRUCTURE / BOS-LINKED ORDER BLOCKS
 # =========================================================
 
-def find_order_block(
+def _bos_events(
     df: pd.DataFrame,
-    side: str,
-    lookback: int = 30,
-) -> dict | None:
-
+    lookback: int = 80,
+    structure_window: int = 12,
+) -> list[dict]:
     """
-    Простая SMC-логика:
+    Detect simple confirmed BOS events using closed candles only.
 
-    LONG:
-        последняя bearish candle
-        перед сильным bullish displacement.
+    Bullish BOS:
+        close breaks the highest high of previous structure_window candles.
 
-    SHORT:
-        последняя bullish candle
-        перед сильным bearish displacement.
-
-    Пока используем полный диапазон свечи как OB.
-    Позже можно сузить до body / 50%.
+    Bearish BOS:
+        close breaks the lowest low of previous structure_window candles.
     """
 
     d = _closed(df)
 
-    if len(d) < 5:
-        return None
+    if len(d) < structure_window + 3:
+        return []
 
     start = max(
-        1,
+        structure_window,
         len(d) - lookback,
     )
 
-    # Идём с конца — нужен самый свежий OB.
-    for i in range(
-        len(d) - 2,
-        start - 1,
-        -1,
-    ):
+    events: list[dict] = []
 
-        candle = d.iloc[i]
-        nxt = d.iloc[i + 1]
+    for i in range(start, len(d)):
+        previous = d.iloc[
+            i - structure_window:i
+        ]
 
-        candle_open = float(
-            candle["open"]
-        )
-
-        candle_close = float(
-            candle["close"]
-        )
-
-        candle_high = float(
-            candle["high"]
-        )
-
-        candle_low = float(
-            candle["low"]
-        )
-
-        next_open = float(
-            nxt["open"]
-        )
-
-        next_close = float(
-            nxt["close"]
-        )
-
-        next_range = abs(
-            next_close - next_open
-        )
-
-        current_range = max(
-            abs(
-                candle_close
-                - candle_open
-            ),
-            1e-12,
-        )
-
-        # Нужен хотя бы заметный displacement.
-        displacement = (
-            next_range
-            >= current_range * 1.25
-        )
-
-        if not displacement:
+        if previous.empty:
             continue
 
-        # =============================================
-        # BULLISH ORDER BLOCK
-        # =============================================
+        prev_high = float(
+            previous["high"].max()
+        )
 
-        if (
-            side == "LONG"
-            and candle_close < candle_open
-            and next_close > next_open
+        prev_low = float(
+            previous["low"].min()
+        )
+
+        candle = d.iloc[i]
+        close = float(candle["close"])
+
+        if close > prev_high:
+            events.append(
+                {
+                    "side": "LONG",
+                    "type": "BOS",
+                    "index": i,
+                    "time": candle["time"],
+                    "broken_level": prev_high,
+                }
+            )
+
+        elif close < prev_low:
+            events.append(
+                {
+                    "side": "SHORT",
+                    "type": "BOS",
+                    "index": i,
+                    "time": candle["time"],
+                    "broken_level": prev_low,
+                }
+            )
+
+    return events
+
+
+def _refine_order_block(
+    candle: pd.Series,
+    atr_value: float,
+    side: str,
+    mode: str = "DEFENSIVE",
+) -> tuple[float, float]:
+    """
+    Refine a raw order block using its size relative to ATR.
+
+    This follows the same idea as the TradingFinder defensive/aggressive
+    refinement: wide blocks are narrowed, while small blocks are kept intact.
+
+    Returns:
+        zone_low, zone_high
+    """
+
+    low = float(candle["low"])
+    high = float(candle["high"])
+    open_ = float(candle["open"])
+    close = float(candle["close"])
+
+    raw_range = max(
+        high - low,
+        1e-12,
+    )
+
+    if (
+        mode.upper() == "AGGRESSIVE"
+        or not math.isfinite(atr_value)
+        or atr_value <= 0
+    ):
+        return low, high
+
+    # Defensive refinement:
+    # progressively narrow very large blocks.
+    ratio = raw_range / atr_value
+
+    if ratio >= 3.0:
+        keep = 0.30
+    elif ratio >= 2.0:
+        keep = 0.40
+    elif ratio >= 1.6:
+        keep = 0.50
+    elif ratio > 1.0:
+        keep = 0.75
+    else:
+        keep = 1.00
+
+    body_low = min(open_, close)
+    body_high = max(open_, close)
+
+    if side == "LONG":
+        # Keep the deeper / discount part of bullish demand OB.
+        refined_high = low + raw_range * keep
+
+        # Do not refine beyond the candle body in an unrealistic way.
+        refined_high = min(
+            max(refined_high, body_low),
+            high,
+        )
+
+        return low, refined_high
+
+    # SHORT: keep upper / premium part of supply OB.
+    refined_low = high - raw_range * keep
+
+    refined_low = max(
+        min(refined_low, body_high),
+        low,
+    )
+
+    return refined_low, high
+
+
+def find_order_block(
+    df: pd.DataFrame,
+    side: str,
+    lookback: int = 80,
+    structure_window: int = 12,
+    origin_search: int = 8,
+    refine_mode: str = "DEFENSIVE",
+) -> dict | None:
+    """
+    Order Block is linked to a confirmed BOS.
+
+    LONG:
+        find latest bullish BOS,
+        then locate the last bearish origin candle before the BOS.
+
+    SHORT:
+        find latest bearish BOS,
+        then locate the last bullish origin candle before the BOS.
+
+    Old / mitigated order blocks are discarded.
+    """
+
+    d = _closed(df)
+
+    if len(d) < structure_window + 5:
+        return None
+
+    atr_values = _atr_series(d, length=55)
+
+    events = [
+        event
+        for event in _bos_events(
+            df,
+            lookback=lookback,
+            structure_window=structure_window,
+        )
+        if event["side"] == side
+    ]
+
+    if not events:
+        return None
+
+    for bos in reversed(events):
+        bos_index = int(
+            bos["index"]
+        )
+
+        search_start = max(
+            0,
+            bos_index - origin_search,
+        )
+
+        origin_index = None
+
+        for i in range(
+            bos_index - 1,
+            search_start - 1,
+            -1,
         ):
+            candle = d.iloc[i]
 
-            return {
-                "side": "LONG",
-                "type": "ORDER_BLOCK",
-                "low": candle_low,
-                "high": candle_high,
-                "mid": (
-                    candle_low
-                    + candle_high
-                ) / 2.0,
-                "time": candle["time"],
-                "index": i,
-            }
+            candle_open = float(
+                candle["open"]
+            )
 
-        # =============================================
-        # BEARISH ORDER BLOCK
-        # =============================================
+            candle_close = float(
+                candle["close"]
+            )
 
-        if (
-            side == "SHORT"
-            and candle_close > candle_open
-            and next_close < next_open
-        ):
+            if (
+                side == "LONG"
+                and candle_close < candle_open
+            ):
+                origin_index = i
+                break
 
-            return {
-                "side": "SHORT",
-                "type": "ORDER_BLOCK",
-                "low": candle_low,
-                "high": candle_high,
-                "mid": (
-                    candle_low
-                    + candle_high
-                ) / 2.0,
-                "time": candle["time"],
-                "index": i,
-            }
+            if (
+                side == "SHORT"
+                and candle_close > candle_open
+            ):
+                origin_index = i
+                break
+
+        if origin_index is None:
+            continue
+
+        candle = d.iloc[
+            origin_index
+        ]
+
+        atr_value = float(
+            atr_values.iloc[
+                origin_index
+            ]
+        )
+
+        zone_low, zone_high = (
+            _refine_order_block(
+                candle,
+                atr_value,
+                side,
+                mode=refine_mode,
+            )
+        )
+
+        future = d.iloc[
+            bos_index + 1:
+        ]
+
+        # TradingFinder/LuxAlgo-style mitigation:
+        # bullish OB is dead below distal;
+        # bearish OB is dead above distal.
+        if side == "LONG":
+
+            invalidated = (
+                not future.empty
+                and float(
+                    future["low"].min()
+                ) < zone_low
+            )
+
+        else:
+
+            invalidated = (
+                not future.empty
+                and float(
+                    future["high"].max()
+                ) > zone_high
+            )
+
+        if invalidated:
+            continue
+
+        return {
+            "side": side,
+            "type": "ORDER_BLOCK",
+            "low": float(zone_low),
+            "high": float(zone_high),
+            "mid": _zone_mid(
+                zone_low,
+                zone_high,
+            ),
+            "time": candle["time"],
+            "index": origin_index,
+            "bos_time": bos["time"],
+            "bos_index": bos_index,
+            "broken_level": float(
+                bos["broken_level"]
+            ),
+            "atr": atr_value,
+            "refine_mode": refine_mode.upper(),
+        }
 
     return None
 
@@ -320,13 +580,15 @@ def overlap_zone(
     fvg: dict | None,
     ob: dict | None,
 ) -> dict | None:
-
     """
-    Если FVG и Order Block пересекаются,
-    это наша premium retrace zone.
+    Intersection between a valid FVG and a valid OB.
+    This is our highest-priority retrace zone.
     """
 
     if not fvg or not ob:
+        return None
+
+    if fvg["side"] != ob["side"]:
         return None
 
     low = max(
@@ -347,9 +609,10 @@ def overlap_zone(
         "side": fvg["side"],
         "low": low,
         "high": high,
-        "mid": (
-            low + high
-        ) / 2.0,
+        "mid": _zone_mid(
+            low,
+            high,
+        ),
     }
 
 
@@ -361,18 +624,20 @@ def build_retrace_entry(
     df15: pd.DataFrame,
     side: str,
 ) -> dict | None:
-
     """
-    Приоритет:
+    Priority:
 
-    1. FVG + Order Block overlap
-    2. FVG 50%
-    3. Order Block 50%
+    1. Valid FVG + BOS-linked refined Order Block overlap
+    2. Valid LuxAlgo-style FVG 50%
+    3. Valid BOS-linked refined Order Block 50%
 
-    Возвращает готовую retrace zone.
+    Keeps the same return interface used by engine.py.
     """
 
-    if df15 is None or len(df15) < 20:
+    if (
+        df15 is None
+        or len(df15) < 25
+    ):
         return None
 
     current_price = float(
@@ -383,11 +648,16 @@ def build_retrace_entry(
         df15,
         side,
         current_price,
+        lookback=80,
     )
 
     ob = find_order_block(
         df15,
         side,
+        lookback=80,
+        structure_window=12,
+        origin_search=8,
+        refine_mode="DEFENSIVE",
     )
 
     overlap = overlap_zone(
@@ -395,65 +665,68 @@ def build_retrace_entry(
         ob,
     )
 
-    # =============================================
+    # -------------------------------------------------
     # BEST CASE: FVG + OB
-    # =============================================
+    # -------------------------------------------------
 
     if overlap:
-
         return {
             "side": side,
             "entry_type": "FVG + ORDER BLOCK",
-            "zone_low":
-                overlap["low"],
-            "zone_high":
-                overlap["high"],
-            "entry":
-                overlap["mid"],
-            "current_price":
-                current_price,
+            "zone_low": float(
+                overlap["low"]
+            ),
+            "zone_high": float(
+                overlap["high"]
+            ),
+            "entry": float(
+                overlap["mid"]
+            ),
+            "current_price": current_price,
             "fvg": fvg,
             "order_block": ob,
         }
 
-    # =============================================
-    # FVG
-    # =============================================
+    # -------------------------------------------------
+    # FVG 50%
+    # -------------------------------------------------
 
     if fvg:
-
         return {
             "side": side,
             "entry_type": "FVG 50%",
-            "zone_low":
-                float(fvg["low"]),
-            "zone_high":
-                float(fvg["high"]),
-            "entry":
-                float(fvg["mid"]),
-            "current_price":
-                current_price,
+            "zone_low": float(
+                fvg["low"]
+            ),
+            "zone_high": float(
+                fvg["high"]
+            ),
+            "entry": float(
+                fvg["mid"]
+            ),
+            "current_price": current_price,
             "fvg": fvg,
             "order_block": ob,
         }
 
-    # =============================================
-    # ORDER BLOCK
-    # =============================================
+    # -------------------------------------------------
+    # ORDER BLOCK 50%
+    # -------------------------------------------------
 
     if ob:
-
         return {
             "side": side,
             "entry_type": "ORDER BLOCK 50%",
-            "zone_low":
-                float(ob["low"]),
-            "zone_high":
-                float(ob["high"]),
-            "entry":
-                float(ob["mid"]),
-            "current_price":
-                current_price,
+            "zone_low": float(
+                ob["low"]
+            ),
+            "zone_high": float(
+                ob["high"]
+            ),
+            "entry": float(
+                ob["mid"]
+            ),
+            "current_price": current_price,
             "fvg": None,
             "order_block": ob,
         }
