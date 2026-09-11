@@ -122,6 +122,7 @@ def register_signal(
     sig,
     signal_key: str,
     candle_time: str,
+    live_snapshot: dict | None = None,
 ) -> None:
 
     data = _load()
@@ -214,6 +215,38 @@ def register_signal(
         # Real notification/registration time.
         "created_at": now,
 
+        # Snapshot of the LIVE 15m candle at the moment Telegram signal
+        # was registered. This prevents pre-signal wick contamination.
+        "signal_live_time": (
+            live_snapshot.get("time")
+            if live_snapshot
+            else None
+        ),
+        "signal_live_high": (
+            float(live_snapshot.get("high"))
+            if live_snapshot
+            and live_snapshot.get("high") is not None
+            else None
+        ),
+        "signal_live_low": (
+            float(live_snapshot.get("low"))
+            if live_snapshot
+            and live_snapshot.get("low") is not None
+            else None
+        ),
+        "signal_live_close": (
+            float(live_snapshot.get("close"))
+            if live_snapshot
+            and live_snapshot.get("close") is not None
+            else float(
+                getattr(
+                    sig,
+                    "current_price",
+                    sig.entry,
+                )
+            )
+        ),
+
         "status": status,
         "entry_filled_at": entry_filled_at,
 
@@ -303,9 +336,11 @@ def _future_closed_candles(
     signal_candle_time: str,
 ):
     """
-    Candles AFTER the last closed candle that existed when the signal
-    was sent. This may include the current live 15M candle, allowing
-    intrabar LIMIT / TP / SL touch detection on each scan.
+    Include candles from the live signal candle onward.
+
+    The first/live candle is handled separately with the stored
+    signal-time high/low snapshot, so price action that happened
+    before the Telegram signal cannot falsely fill an entry.
     """
 
     if len(closed) == 0:
@@ -323,12 +358,88 @@ def _future_closed_candles(
         )
 
         return closed[
-            times > signal_ts
+            times >= signal_ts
         ]
 
     except Exception:
-        # Conservative fallback: skip the oldest candidate candle.
         return closed.iloc[-1:0]
+
+
+def _post_signal_range(
+    item: dict,
+    row,
+) -> tuple[float, float]:
+    """
+    Return only the price range that is valid AFTER signal registration.
+
+    If this is the same live 15m candle that existed when the signal was
+    created, ignore its old pre-signal wick and only allow newly extended
+    highs/lows from the saved snapshot.
+
+    For all later candles, use the full candle high/low.
+    """
+
+    high = float(row["high"])
+    low = float(row["low"])
+
+    live_time = item.get("signal_live_time")
+
+    if not live_time:
+        return high, low
+
+    try:
+        row_time = pd.to_datetime(
+            row["time"],
+            utc=True,
+        )
+
+        saved_time = pd.to_datetime(
+            live_time,
+            utc=True,
+        )
+
+        if row_time != saved_time:
+            return high, low
+
+    except Exception:
+        return high, low
+
+    saved_high = item.get(
+        "signal_live_high"
+    )
+    saved_low = item.get(
+        "signal_live_low"
+    )
+    saved_close = float(
+        item.get(
+            "signal_live_close",
+            item.get(
+                "current_price_at_signal",
+                item["entry"],
+            ),
+        )
+    )
+
+    # Same candle: only newly-created movement after signal counts.
+    valid_high = saved_close
+    valid_low = saved_close
+
+    if (
+        saved_high is not None
+        and high > float(saved_high)
+    ):
+        valid_high = high
+
+    if (
+        saved_low is not None
+        and low < float(saved_low)
+    ):
+        valid_low = low
+
+    return (
+        max(valid_high, valid_low),
+        min(valid_high, valid_low),
+    )
 
 
 def _close_ambiguous(
@@ -467,12 +578,9 @@ def update_symbol(
 
             for idx, row in candles.iterrows():
 
-                high = float(
-                    row["high"]
-                )
-
-                low = float(
-                    row["low"]
+                high, low = _post_signal_range(
+                    item,
+                    row,
                 )
 
                 if _entry_touched(
@@ -525,12 +633,9 @@ def update_symbol(
 
         for _, row in candles.iterrows():
 
-            high = float(
-                row["high"]
-            )
-
-            low = float(
-                row["low"]
+            high, low = _post_signal_range(
+                item,
+                row,
             )
 
             candle_time = _iso(
