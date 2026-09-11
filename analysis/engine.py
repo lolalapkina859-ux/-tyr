@@ -28,6 +28,7 @@ from analysis.liquidity import (
 )
 
 from analysis.structure import local_structure_shift
+from analysis.entries import build_retrace_entry
 
 
 @dataclass
@@ -35,11 +36,21 @@ class Signal:
     symbol: str
     side: str
     score: int
+
     entry: float
     sl: float
+
     targets: list[tuple[float, str]]
     reasons: list[str]
     invalidation: str
+
+    entry_status: str
+    entry_type: str
+
+    zone_low: float
+    zone_high: float
+
+    current_price: float
 
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
@@ -547,7 +558,7 @@ def analyze(
         )
 
     # =====================================================
-    # ENTRY / STOP
+    # ENTRY / STOP — FVG / ORDER BLOCK RETRACE
     # =====================================================
 
     current = float(
@@ -564,71 +575,186 @@ def analyze(
     ):
         return None
 
-    if side == "LONG":
+    # -----------------------------------------------------
+    # SOURCE LIQUIDITY EVENT
+    # -----------------------------------------------------
 
+    if side == "LONG":
         source_event = (
             best_long_15
             or best_long_4h
         )
-
-        reclaim = float(
-            source_event["price"]
-        )
-
-        entry = min(
-            current,
-            reclaim + 0.10 * atr15,
-        )
-
-        recent_low = float(
-            m15.iloc[-10:-1]["low"].min()
-        )
-
-        sl = (
-            min(
-                recent_low,
-                reclaim,
-            )
-            - 0.20 * atr15
-        )
-
-        invalidation = (
-            f"15M close below "
-            f"{sl:.8g}"
-        )
-
     else:
-
         source_event = (
             best_short_15
             or best_short_4h
         )
 
-        reclaim = float(
-            source_event["price"]
+    reclaim = float(
+        source_event["price"]
+    )
+
+    # -----------------------------------------------------
+    # SEARCH 15M RETRACE ENTRY
+    # -----------------------------------------------------
+
+    retrace = build_retrace_entry(
+        m15,
+        side,
+    )
+
+    # =====================================================
+    # FVG / OB FOUND
+    # =====================================================
+
+    if retrace:
+        entry = float(
+            retrace["entry"]
         )
 
-        entry = max(
-            current,
-            reclaim - 0.10 * atr15,
+        zone_low = float(
+            retrace["zone_low"]
         )
 
-        recent_high = float(
-            m15.iloc[-10:-1]["high"].max()
+        zone_high = float(
+            retrace["zone_high"]
         )
 
-        sl = (
-            max(
-                recent_high,
-                reclaim,
+        entry_type = str(
+            retrace["entry_type"]
+        )
+
+        if (
+            zone_low
+            <= current
+            <= zone_high
+        ):
+            entry_status = "ENTER_NOW"
+            reasons.append(
+                f"15M {entry_type} entry zone active"
             )
-            + 0.20 * atr15
+        else:
+            entry_status = "WAIT_FOR_RETRACE"
+            reasons.append(
+                f"WAIT FOR RETRACE to {entry_type}"
+            )
+
+        if side == "LONG":
+            recent_low = float(
+                m15.iloc[-12:-1]["low"].min()
+            )
+
+            sl = (
+                min(
+                    recent_low,
+                    zone_low,
+                    reclaim,
+                )
+                - 0.20 * atr15
+            )
+
+            invalidation = (
+                f"15M close below "
+                f"{sl:.8g}"
+            )
+        else:
+            recent_high = float(
+                m15.iloc[-12:-1]["high"].max()
+            )
+
+            sl = (
+                max(
+                    recent_high,
+                    zone_high,
+                    reclaim,
+                )
+                + 0.20 * atr15
+            )
+
+            invalidation = (
+                f"15M close above "
+                f"{sl:.8g}"
+            )
+
+    # =====================================================
+    # NO FVG / OB FOUND — FALLBACK TO LIQUIDITY RETEST
+    # =====================================================
+
+    else:
+        entry_type = "LIQUIDITY RETEST"
+
+        if side == "LONG":
+            entry = min(
+                current,
+                reclaim + 0.10 * atr15,
+            )
+
+            zone_low = (
+                entry - 0.10 * atr15
+            )
+
+            zone_high = (
+                entry + 0.10 * atr15
+            )
+
+            recent_low = float(
+                m15.iloc[-10:-1]["low"].min()
+            )
+
+            sl = (
+                min(
+                    recent_low,
+                    reclaim,
+                )
+                - 0.20 * atr15
+            )
+
+            invalidation = (
+                f"15M close below "
+                f"{sl:.8g}"
+            )
+        else:
+            entry = max(
+                current,
+                reclaim - 0.10 * atr15,
+            )
+
+            zone_low = (
+                entry - 0.10 * atr15
+            )
+
+            zone_high = (
+                entry + 0.10 * atr15
+            )
+
+            recent_high = float(
+                m15.iloc[-10:-1]["high"].max()
+            )
+
+            sl = (
+                max(
+                    recent_high,
+                    reclaim,
+                )
+                + 0.20 * atr15
+            )
+
+            invalidation = (
+                f"15M close above "
+                f"{sl:.8g}"
+            )
+
+        distance = abs(
+            current - entry
         )
 
-        invalidation = (
-            f"15M close above "
-            f"{sl:.8g}"
-        )
+        if distance <= 0.25 * atr15:
+            entry_status = "ENTER_NOW"
+        else:
+            entry_status = "WAIT_FOR_RETRACE"
+            reasons.append(
+                "Price moved away from entry — wait for retest"
+            )
 
     # =====================================================
     # SMART TARGETS
@@ -762,6 +888,33 @@ def analyze(
         return None
 
     # =====================================================
+    # SIGNAL FRESHNESS
+    # =====================================================
+
+    first_target_price = float(
+        targets[0][0]
+    )
+
+    # If price already reached TP1 before the alert,
+    # the setup is considered missed and must not be sent.
+    if side == "LONG":
+        if current >= first_target_price:
+            print(
+                f"{symbol}: MISSED — "
+                f"price already reached TP1 "
+                f"before alert"
+            )
+            return None
+    else:
+        if current <= first_target_price:
+            print(
+                f"{symbol}: MISSED — "
+                f"price already reached TP1 "
+                f"before alert"
+            )
+            return None
+
+    # =====================================================
     # RISK / REWARD BONUS
     # =====================================================
 
@@ -829,9 +982,19 @@ def analyze(
         symbol=symbol,
         side=side,
         score=score,
+
         entry=entry,
         sl=sl,
+
         targets=targets,
         reasons=reasons,
         invalidation=invalidation,
+
+        entry_status=entry_status,
+        entry_type=entry_type,
+
+        zone_low=zone_low,
+        zone_high=zone_high,
+
+        current_price=current,
     )
