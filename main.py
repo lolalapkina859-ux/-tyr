@@ -14,33 +14,46 @@ from exchange.bybit import (
 
 from analysis.engine import analyze
 from telegram.notifier import send_signal
+
 from state.store import (
     load_state,
     already_sent,
     mark_sent,
 )
 
+from state.tracker import (
+    register_signal,
+    update_symbol,
+    get_summary,
+)
+
 
 TOP_SYMBOLS_LIMIT = 30
-TOP_SYMBOLS_REFRESH_SECONDS = 60 * 60  # обновлять TOP-30 раз в час
+TOP_SYMBOLS_REFRESH_SECONDS = 60 * 60
 
 
 def signal_key(sig, candle_time):
-    return f"{sig.symbol}:{sig.side}:{candle_time}:{sig.score}"
+    return (
+        f"{sig.symbol}:"
+        f"{sig.side}:"
+        f"{candle_time}:"
+        f"{sig.score}"
+    )
 
 
 def load_symbols():
-    """
-    Получаем TOP-30 BingX USDT perpetual по объёму.
-    Если BingX временно не отвечает — используем WATCHED_SYMBOLS из config.py.
-    """
 
-    symbols = get_top_symbols(TOP_SYMBOLS_LIMIT)
+    symbols = get_top_symbols(
+        TOP_SYMBOLS_LIMIT
+    )
 
     if symbols:
+
         print(
-            f"[BingX] Using TOP {len(symbols)} symbols"
+            f"[BingX] Using TOP "
+            f"{len(symbols)} symbols"
         )
+
         return symbols
 
     print(
@@ -51,43 +64,83 @@ def load_symbols():
     return WATCHED_SYMBOLS
 
 
+def print_tracker_events(
+    symbol,
+    events,
+):
+
+    for event in events:
+
+        event_type = event.get(
+            "type"
+        )
+
+        if event_type == "TP_HIT":
+
+            print(
+                f"[TRACKER] "
+                f"{symbol} "
+                f"TP{event['tp']} HIT ✅ "
+                f"R={event['rr']:.2f}"
+            )
+
+        elif event_type == "SL_HIT":
+
+            print(
+                f"[TRACKER] "
+                f"{symbol} "
+                f"SL HIT ❌ "
+                f"Result=-1R"
+            )
+
+
 def run():
 
     state = load_state()
 
     print(
-        "=== TRADE VISION 24/7 — LIQUIDITY SIGNAL BOT ==="
+        "=== TRADE VISION 24/7 — "
+        "LIQUIDITY SIGNAL BOT ==="
     )
 
     print(
-        f"Min score: {MIN_SIGNAL_SCORE}"
+        f"Min score: "
+        f"{MIN_SIGNAL_SCORE}"
     )
 
     print(
-        f"Scan interval: {SCAN_INTERVAL_SECONDS} sec"
+        f"Scan interval: "
+        f"{SCAN_INTERVAL_SECONDS} sec"
     )
 
-    # Получаем TOP-30 при запуске
     symbols = load_symbols()
 
     print(
-        f"Symbols ({len(symbols)}): {symbols}"
+        f"Symbols ({len(symbols)}): "
+        f"{symbols}"
     )
 
-    last_symbols_update = time.time()
+    last_symbols_update = (
+        time.time()
+    )
+
+    scan_number = 0
 
     while True:
+
+        scan_number += 1
 
         started = datetime.now(
             timezone.utc
         )
 
         print(
-            f"\n[{started.isoformat()}] Scan started"
+            f"\n[{started.isoformat()}] "
+            f"Scan #{scan_number} started"
         )
 
         # ==================================================
-        # UPDATE TOP-30 ONCE PER HOUR
+        # UPDATE TOP-30
         # ==================================================
 
         if (
@@ -97,33 +150,42 @@ def run():
         ):
 
             print(
-                "[BingX] Refreshing TOP symbols..."
+                "[BingX] Refreshing "
+                "TOP symbols..."
             )
 
-            new_symbols = get_top_symbols(
-                TOP_SYMBOLS_LIMIT
+            new_symbols = (
+                get_top_symbols(
+                    TOP_SYMBOLS_LIMIT
+                )
             )
 
             if new_symbols:
 
-                symbols = new_symbols
+                symbols = (
+                    new_symbols
+                )
 
                 print(
-                    f"[BingX] TOP symbols updated: "
+                    "[BingX] "
+                    f"TOP symbols updated: "
                     f"{symbols}"
                 )
 
             else:
 
                 print(
-                    "[BingX] TOP symbols refresh failed. "
+                    "[BingX] TOP symbols "
+                    "refresh failed. "
                     "Keeping previous list."
                 )
 
-            last_symbols_update = time.time()
+            last_symbols_update = (
+                time.time()
+            )
 
         # ==================================================
-        # SCAN
+        # SCAN SYMBOLS
         # ==================================================
 
         for symbol in symbols:
@@ -134,9 +196,9 @@ def run():
                     f"\n--- {symbol} ---"
                 )
 
-                # ==============================
-                # 4H DATA
-                # ==============================
+                # ==========================================
+                # 4H
+                # ==========================================
 
                 df4h = get_klines(
                     symbol,
@@ -144,11 +206,13 @@ def run():
                     400,
                 )
 
-                time.sleep(0.20)
+                time.sleep(
+                    0.20
+                )
 
-                # ==============================
-                # 15M DATA
-                # ==============================
+                # ==========================================
+                # 15M
+                # ==========================================
 
                 df15 = get_klines(
                     symbol,
@@ -156,16 +220,19 @@ def run():
                     500,
                 )
 
-                time.sleep(0.20)
+                time.sleep(
+                    0.20
+                )
 
-                # ==============================
-                # DATA VALIDATION
-                # ==============================
+                # ==========================================
+                # DATA CHECK
+                # ==========================================
 
                 if df4h is None:
 
                     print(
-                        f"{symbol}: 4H data unavailable"
+                        f"{symbol}: "
+                        "4H data unavailable"
                     )
 
                     continue
@@ -173,7 +240,8 @@ def run():
                 if df15 is None:
 
                     print(
-                        f"{symbol}: 15M data unavailable"
+                        f"{symbol}: "
+                        "15M data unavailable"
                     )
 
                     continue
@@ -181,7 +249,8 @@ def run():
                 if len(df4h) < 100:
 
                     print(
-                        f"{symbol}: not enough 4H data "
+                        f"{symbol}: "
+                        f"not enough 4H data "
                         f"({len(df4h)})"
                     )
 
@@ -190,15 +259,34 @@ def run():
                 if len(df15) < 150:
 
                     print(
-                        f"{symbol}: not enough 15M data "
+                        f"{symbol}: "
+                        f"not enough 15M data "
                         f"({len(df15)})"
                     )
 
                     continue
 
-                # ==============================
+                # ==========================================
+                # TRACK EXISTING SIGNALS
+                # ==========================================
+
+                tracker_events = (
+                    update_symbol(
+                        symbol,
+                        df15,
+                    )
+                )
+
+                if tracker_events:
+
+                    print_tracker_events(
+                        symbol,
+                        tracker_events,
+                    )
+
+                # ==========================================
                 # ANALYSIS
-                # ==============================
+                # ==========================================
 
                 sig = analyze(
                     symbol,
@@ -209,7 +297,8 @@ def run():
                 if sig is None:
 
                     print(
-                        f"{symbol}: no setup"
+                        f"{symbol}: "
+                        "no setup"
                     )
 
                     continue
@@ -220,23 +309,27 @@ def run():
                     f"score={sig.score}"
                 )
 
-                # ==============================
+                # ==========================================
                 # SCORE FILTER
-                # ==============================
+                # ==========================================
 
-                if sig.score < MIN_SIGNAL_SCORE:
+                if (
+                    sig.score
+                    < MIN_SIGNAL_SCORE
+                ):
 
                     print(
-                        f"{symbol}: signal ignored "
+                        f"{symbol}: "
+                        "signal ignored "
                         f"({sig.score} < "
                         f"{MIN_SIGNAL_SCORE})"
                     )
 
                     continue
 
-                # ==============================
-                # DUPLICATE PROTECTION
-                # ==============================
+                # ==========================================
+                # SIGNAL ID
+                # ==========================================
 
                 closed_15m_time = (
                     df15
@@ -249,20 +342,25 @@ def run():
                     closed_15m_time,
                 )
 
+                # ==========================================
+                # DUPLICATE CHECK
+                # ==========================================
+
                 if already_sent(
                     state,
                     key,
                 ):
 
                     print(
-                        f"{symbol}: signal already sent"
+                        f"{symbol}: "
+                        "signal already sent"
                     )
 
                     continue
 
-                # ==============================
+                # ==========================================
                 # TELEGRAM
-                # ==============================
+                # ==========================================
 
                 sent = send_signal(
                     sig
@@ -270,34 +368,119 @@ def run():
 
                 if sent:
 
+                    # --------------------------------------
+                    # SAVE TO STATISTICS
+                    # --------------------------------------
+
+                    register_signal(
+                        sig,
+                        key,
+                        closed_15m_time,
+                    )
+
+                    # --------------------------------------
+                    # MARK TELEGRAM SENT
+                    # --------------------------------------
+
                     state = mark_sent(
                         state,
                         key,
                     )
 
                     print(
-                        f"{symbol}: Telegram signal sent ✅"
+                        f"{symbol}: "
+                        "Telegram signal sent ✅"
+                    )
+
+                    print(
+                        f"[TRACKER] "
+                        f"{symbol} signal "
+                        "registered 📊"
                     )
 
                 else:
 
                     print(
-                        f"{symbol}: Telegram send failed"
+                        f"{symbol}: "
+                        "Telegram send failed"
                     )
 
             except Exception as exc:
 
                 print(
-                    f"{symbol}: ERROR {exc}"
+                    f"{symbol}: "
+                    f"ERROR {exc}"
                 )
 
         # ==================================================
-        # WAIT FOR NEXT SCAN
+        # STATISTICS
+        # ==================================================
+
+        try:
+
+            summary = (
+                get_summary()
+            )
+
+            print(
+                "\n=== SIGNAL TRACKER ==="
+            )
+
+            print(
+                f"Total: "
+                f"{summary['total']}"
+            )
+
+            print(
+                f"Open: "
+                f"{summary['open']}"
+            )
+
+            print(
+                f"Closed: "
+                f"{summary['closed']}"
+            )
+
+            print(
+                f"TP1: "
+                f"{summary['tp1']}"
+            )
+
+            print(
+                f"TP2: "
+                f"{summary['tp2']}"
+            )
+
+            print(
+                f"TP3: "
+                f"{summary['tp3']}"
+            )
+
+            print(
+                f"TP4: "
+                f"{summary['tp4']}"
+            )
+
+            print(
+                f"Losses: "
+                f"{summary['losses']}"
+            )
+
+        except Exception as exc:
+
+            print(
+                "[TRACKER] "
+                f"Summary error: {exc}"
+            )
+
+        # ==================================================
+        # WAIT
         # ==================================================
 
         print(
             f"\nScan finished. "
-            f"Sleeping {SCAN_INTERVAL_SECONDS} sec..."
+            f"Sleeping "
+            f"{SCAN_INTERVAL_SECONDS} sec..."
         )
 
         time.sleep(
