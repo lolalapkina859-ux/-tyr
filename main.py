@@ -33,8 +33,6 @@ TOP_SYMBOLS_REFRESH_SECONDS = 60 * 60
 
 
 def signal_key(sig):
-    """Stable setup ID for deduplication."""
-
     zone_low = round(float(sig.zone_low), 8)
     zone_high = round(float(sig.zone_high), 8)
     entry = round(float(sig.entry), 8)
@@ -78,7 +76,14 @@ def print_tracker_events(
             "type"
         )
 
-        if event_type == "TP_HIT":
+        if event_type == "ENTRY_FILLED":
+            print(
+                f"[TRACKER] "
+                f"{symbol} ENTRY FILLED ✅ "
+                f"at {event['price']}"
+            )
+
+        elif event_type == "TP_HIT":
             print(
                 f"[TRACKER] "
                 f"{symbol} "
@@ -92,6 +97,25 @@ def print_tracker_events(
                 f"{symbol} "
                 f"SL HIT ❌ "
                 f"Result=-1R"
+            )
+
+        elif event_type == "EXPIRED":
+            print(
+                f"[TRACKER] "
+                f"{symbol} setup EXPIRED ⏳"
+            )
+
+        elif event_type == "AMBIGUOUS":
+            print(
+                f"[TRACKER] "
+                f"{symbol} AMBIGUOUS ⚠️"
+            )
+
+        elif event_type == "CLOSED_TP":
+            print(
+                f"[TRACKER] "
+                f"{symbol} CLOSED ON FINAL TP ✅ "
+                f"R={event['result_r']:.2f}"
             )
 
 
@@ -326,11 +350,19 @@ def run():
             summary = get_summary()
 
             print(
-                "\n=== SIGNAL TRACKER ==="
+                "\n=== SIGNAL TRACKER V2 ==="
             )
 
             print(
                 f"Total: {summary['total']}"
+            )
+
+            print(
+                f"Pending: {summary['pending']}"
+            )
+
+            print(
+                f"Filled: {summary['filled']}"
             )
 
             print(
@@ -339,6 +371,26 @@ def run():
 
             print(
                 f"Closed: {summary['closed']}"
+            )
+
+            print(
+                f"Expired: {summary['expired']}"
+            )
+
+            print(
+                f"Ambiguous: {summary['ambiguous']}"
+            )
+
+            print(
+                f"Wins: {summary['wins']}"
+            )
+
+            print(
+                f"Losses: {summary['losses']}"
+            )
+
+            print(
+                f"WinRate: {summary['win_rate']:.1f}%"
             )
 
             print(
@@ -355,10 +407,6 @@ def run():
 
             print(
                 f"TP4: {summary['tp4']}"
-            )
-
-            print(
-                f"Losses: {summary['losses']}"
             )
 
         except Exception as exc:
