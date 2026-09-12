@@ -252,6 +252,10 @@ def register_signal(
 
         "highest_tp": 0,
 
+        # After TP1 the protective stop is moved to breakeven (entry).
+        "be_armed": False,
+        "be_armed_at": None,
+
         "risk": risk,
 
         "max_r": 0.0,
@@ -689,9 +693,30 @@ def update_symbol(
                 ),
             )
 
-            sl_touched = _sl_hit(
+            # -------------------------------------------------
+            # PROTECTIVE STOP
+            # Before TP1 -> original SL.
+            # After TP1  -> move stop to breakeven (ENTRY).
+            # -------------------------------------------------
+            be_active = (
+                highest_tp >= 1
+                or bool(
+                    item.get(
+                        "be_armed",
+                        False,
+                    )
+                )
+            )
+
+            active_stop = (
+                entry
+                if be_active
+                else sl
+            )
+
+            stop_touched = _sl_hit(
                 side,
-                sl,
+                active_stop,
                 high,
                 low,
             )
@@ -720,10 +745,10 @@ def update_symbol(
                         idx
                     )
 
-            # If the same 15m candle hits SL and one or more TPs,
-            # intrabar order is unknowable -> AMBIGUOUS.
+            # If the same 15m candle hits the currently-active stop
+            # and one or more new TPs, intrabar order is unknowable.
             if (
-                sl_touched
+                stop_touched
                 and newly_hit
             ):
                 _close_ambiguous(
@@ -735,20 +760,36 @@ def update_symbol(
                 changed = True
                 break
 
-            if sl_touched:
+            if stop_touched:
 
                 item["status"] = "CLOSED"
                 item["closed_at"] = candle_time
-                item["result_r"] = -1.0
 
-                events.append({
-                    "type": "SL_HIT",
-                    "symbol": symbol,
-                    "side": side,
-                    "score": item["score"],
-                    "result_r": -1.0,
-                    "key": item["key"],
-                })
+                if be_active:
+                    item["result_r"] = 0.0
+
+                    events.append({
+                        "type": "BE_HIT",
+                        "symbol": symbol,
+                        "side": side,
+                        "score": item["score"],
+                        "result_r": 0.0,
+                        "price": entry,
+                        "highest_tp": highest_tp,
+                        "key": item["key"],
+                    })
+
+                else:
+                    item["result_r"] = -1.0
+
+                    events.append({
+                        "type": "SL_HIT",
+                        "symbol": symbol,
+                        "side": side,
+                        "score": item["score"],
+                        "result_r": -1.0,
+                        "key": item["key"],
+                    })
 
                 changed = True
                 break
@@ -772,6 +813,16 @@ def update_symbol(
                     item[
                         "highest_tp"
                     ] = highest_tp
+
+                    if highest_tp >= 1:
+                        item["be_armed"] = True
+
+                        if not item.get(
+                            "be_armed_at"
+                        ):
+                            item["be_armed_at"] = (
+                                candle_time
+                            )
 
                     rr = (
                         abs(
@@ -914,6 +965,21 @@ def get_summary() -> dict:
             ) >= level
         )
 
+    breakeven = sum(
+        1
+        for x in closed
+        if x.get("result_r") is not None
+        and float(
+            x.get("result_r")
+        ) == 0.0
+        and int(
+            x.get(
+                "highest_tp",
+                0,
+            )
+        ) >= 1
+    )
+
     closed_decided = wins + losses
 
     win_rate = (
@@ -963,6 +1029,7 @@ def get_summary() -> dict:
 
         "wins": wins,
         "losses": losses,
+        "breakeven": breakeven,
         "win_rate": win_rate,
 
         "tp1": tp_count(1),
