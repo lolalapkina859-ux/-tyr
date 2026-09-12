@@ -425,7 +425,11 @@ def run():
             )
 
             print(
-                f"Wins: {summary['wins']}"
+                f"Duplicates: {summary.get('duplicates', 0)}"
+            )
+
+            print(
+                f"Wins (TP1+): {summary['wins']}"
             )
 
             print(
@@ -433,7 +437,7 @@ def run():
             )
 
             print(
-                f"BreakEven: {summary.get('breakeven', 0)}"
+                f"BE after TP1: {summary.get('breakeven', 0)}"
             )
 
             print(
@@ -529,7 +533,7 @@ def run():
                         and item["highest_tp"] >= 1
                     ):
                         result_text = (
-                            "BE 🟡 +0.00R"
+                            "WIN ✅ TP1 + BE"
                         )
 
                     elif result_r is not None:
@@ -562,6 +566,24 @@ def run():
                         f"{item['symbol']} "
                         f"{item['side']} | "
                         f"LIMIT NOT FILLED | "
+                        f"Entry {item['entry']} | "
+                        f"⭐{item['score']}"
+                    )
+
+
+            duplicate_list = summary.get(
+                "duplicate_signals",
+                [],
+            )
+
+            if duplicate_list:
+                print("\n♻️ DUPLICATES")
+
+                for item in duplicate_list:
+                    print(
+                        f"{item['symbol']} "
+                        f"{item['side']} | "
+                        f"IGNORED OLD COPY | "
                         f"Entry {item['entry']} | "
                         f"⭐{item['score']}"
                     )
