@@ -422,6 +422,107 @@ def run():
                 f"TP4: {summary['tp4']}"
             )
 
+            # ==================================================
+            # DETAILED TRACKER LISTS
+            # ==================================================
+
+            pending_list = summary.get(
+                "pending_signals",
+                [],
+            )
+
+            if pending_list:
+                print("\n⏳ PENDING")
+
+                for item in pending_list:
+                    print(
+                        f"{item['symbol']} "
+                        f"{item['side']} | "
+                        f"LIMIT {item['entry']} | "
+                        f"⭐{item['score']}"
+                    )
+
+            open_list = summary.get(
+                "open_signals",
+                [],
+            )
+
+            if open_list:
+                print("\n🟢 OPEN")
+
+                for item in open_list:
+                    if item["highest_tp"] > 0:
+                        tp_text = (
+                            f"TP{item['highest_tp']} ✅"
+                        )
+                    else:
+                        tp_text = "TP1 ⏳"
+
+                    print(
+                        f"{item['symbol']} "
+                        f"{item['side']} | "
+                        f"Entry {item['entry']} | "
+                        f"{tp_text} | "
+                        f"Best {item['max_r']:+.2f}R | "
+                        f"⭐{item['score']}"
+                    )
+
+            closed_list = summary.get(
+                "closed_signals",
+                [],
+            )
+
+            if closed_list:
+                print("\n🏁 CLOSED")
+
+                for item in closed_list:
+                    result_r = item.get(
+                        "result_r"
+                    )
+
+                    if (
+                        result_r is not None
+                        and float(result_r) < 0
+                    ):
+                        result_text = (
+                            f"SL ❌ "
+                            f"{float(result_r):+.2f}R"
+                        )
+
+                    elif result_r is not None:
+                        result_text = (
+                            f"WIN ✅ "
+                            f"{float(result_r):+.2f}R"
+                        )
+
+                    else:
+                        result_text = "CLOSED"
+
+                    print(
+                        f"{item['symbol']} "
+                        f"{item['side']} | "
+                        f"{result_text} | "
+                        f"TP{item['highest_tp']} | "
+                        f"⭐{item['score']}"
+                    )
+
+            expired_list = summary.get(
+                "expired_signals",
+                [],
+            )
+
+            if expired_list:
+                print("\n⌛ EXPIRED")
+
+                for item in expired_list:
+                    print(
+                        f"{item['symbol']} "
+                        f"{item['side']} | "
+                        f"LIMIT NOT FILLED | "
+                        f"Entry {item['entry']} | "
+                        f"⭐{item['score']}"
+                    )
+
         except Exception as exc:
             print(
                 "[TRACKER] "
