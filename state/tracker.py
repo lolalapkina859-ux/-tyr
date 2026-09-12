@@ -115,6 +115,125 @@ def _sorted_targets(
 
 
 # =========================================================
+# ACTIVE LIQUIDITY SCENARIO
+# =========================================================
+
+HTF_LIQUIDITY_LEVELS = (
+    "PMH",
+    "PML",
+    "PWH",
+    "PWL",
+    "PDH",
+    "PDL",
+    "PSH",
+    "PSL",
+)
+
+
+def _liquidity_thesis_from_reasons(
+    reasons,
+) -> str:
+    """
+    Extract the higher-timeframe liquidity thesis from signal reasons.
+
+    Example:
+        ZROUSDT + LONG + PWL
+        -> one active scenario even if a newer 15M Order Block appears.
+    """
+
+    if not reasons:
+        return "UNKNOWN"
+
+    text = " ".join(
+        str(reason)
+        for reason in reasons
+    ).upper()
+
+    # Match HTF liquidity only.
+    # Session levels such as NYL/LONH/ASIA are intentionally ignored,
+    # because they are confirmations, not a new higher-timeframe thesis.
+    for level in HTF_LIQUIDITY_LEVELS:
+        if level in text.split():
+            return level
+
+    # More tolerant match for punctuation such as "PWL," or "(PWL)".
+    for level in HTF_LIQUIDITY_LEVELS:
+        if level in text:
+            return level
+
+    return "UNKNOWN"
+
+
+def build_scenario_key(
+    symbol: str,
+    side: str,
+    reasons,
+) -> str:
+    thesis = _liquidity_thesis_from_reasons(
+        reasons
+    )
+
+    return (
+        f"{symbol}:"
+        f"{side}:"
+        f"{thesis}"
+    )
+
+
+def has_active_scenario(
+    scenario_key: str,
+) -> bool:
+    """
+    Block a new Telegram signal while the same liquidity thesis
+    is already PENDING or OPEN.
+
+    CLOSED / EXPIRED / AMBIGUOUS scenarios no longer block a new setup.
+    """
+
+    data = _load()
+
+    for item in data.get(
+        "signals",
+        [],
+    ):
+        status = item.get(
+            "status"
+        )
+
+        if status not in (
+            "PENDING",
+            "OPEN",
+        ):
+            continue
+
+        existing_key = item.get(
+            "scenario_key"
+        )
+
+        # Migration for signals created before scenario_key existed.
+        if not existing_key:
+            existing_key = build_scenario_key(
+                item.get(
+                    "symbol",
+                    ""
+                ),
+                item.get(
+                    "side",
+                    ""
+                ),
+                item.get(
+                    "reasons",
+                    [],
+                ),
+            )
+
+        if existing_key == scenario_key:
+            return True
+
+    return False
+
+
+# =========================================================
 # REGISTER NEW SIGNAL
 # =========================================================
 
@@ -159,8 +278,15 @@ def register_signal(
         status = "OPEN"
         entry_filled_at = now
 
+    scenario_key = build_scenario_key(
+        sig.symbol,
+        sig.side,
+        sig.reasons,
+    )
+
     item = {
         "key": signal_key,
+        "scenario_key": scenario_key,
 
         "symbol": sig.symbol,
         "side": sig.side,
