@@ -853,52 +853,44 @@ def get_summary() -> dict:
     pending = [
         x
         for x in signals
-        if x.get("status")
-        == "PENDING"
+        if x.get("status") == "PENDING"
     ]
 
     open_signals = [
         x
         for x in signals
-        if x.get("status")
-        == "OPEN"
+        if x.get("status") == "OPEN"
     ]
 
     closed = [
         x
         for x in signals
-        if x.get("status")
-        == "CLOSED"
+        if x.get("status") == "CLOSED"
     ]
 
     expired = [
         x
         for x in signals
-        if x.get("status")
-        == "EXPIRED"
+        if x.get("status") == "EXPIRED"
     ]
 
     ambiguous = [
         x
         for x in signals
-        if x.get("status")
-        == "AMBIGUOUS"
+        if x.get("status") == "AMBIGUOUS"
     ]
 
     filled = [
         x
         for x in signals
-        if x.get(
-            "entry_filled_at"
-        )
+        if x.get("entry_filled_at")
     ]
 
     losses = sum(
         1
         for x in closed
         if float(
-            x.get("result_r")
-            or 0
+            x.get("result_r") or 0
         ) < 0
     )
 
@@ -906,8 +898,7 @@ def get_summary() -> dict:
         1
         for x in closed
         if float(
-            x.get("result_r")
-            or 0
+            x.get("result_r") or 0
         ) > 0
     )
 
@@ -923,23 +914,15 @@ def get_summary() -> dict:
             ) >= level
         )
 
-    closed_decided = (
-        wins
-        + losses
-    )
+    closed_decided = wins + losses
 
     win_rate = (
-        wins
-        / closed_decided
-        * 100.0
+        wins / closed_decided * 100.0
         if closed_decided > 0
         else 0.0
     )
 
-    return {
-        "total": len(signals),
-
-            def compact(x):
+    def compact(x):
         return {
             "symbol": x.get("symbol"),
             "side": x.get("side"),
@@ -948,12 +931,20 @@ def get_summary() -> dict:
             "entry": x.get("entry"),
             "sl": x.get("sl"),
             "highest_tp": int(
-                x.get("highest_tp", 0)
+                x.get(
+                    "highest_tp",
+                    0,
+                )
             ),
             "max_r": float(
-                x.get("max_r", 0.0)
+                x.get(
+                    "max_r",
+                    0.0,
+                )
             ),
-            "result_r": x.get("result_r"),
+            "result_r": x.get(
+                "result_r"
+            ),
             "entry_filled_at": x.get(
                 "entry_filled_at"
             ),
@@ -979,7 +970,6 @@ def get_summary() -> dict:
         "tp3": tp_count(3),
         "tp4": tp_count(4),
 
-        # Detailed lists for Railway logs
         "pending_signals": [
             compact(x)
             for x in pending
