@@ -233,6 +233,94 @@ def has_active_scenario(
     return False
 
 
+def cleanup_active_duplicates() -> int:
+    """
+    One-time/idempotent cleanup for old duplicate active scenarios.
+
+    For the same scenario_key, keep the earliest PENDING/OPEN signal.
+    Later active copies are marked DUPLICATE and excluded from stats.
+    """
+    data = _load()
+    signals = data.get(
+        "signals",
+        [],
+    )
+
+    active = []
+
+    for item in signals:
+        if item.get("status") not in (
+            "PENDING",
+            "OPEN",
+        ):
+            continue
+
+        scenario_key = item.get(
+            "scenario_key"
+        )
+
+        if not scenario_key:
+            scenario_key = build_scenario_key(
+                item.get(
+                    "symbol",
+                    ""
+                ),
+                item.get(
+                    "side",
+                    ""
+                ),
+                item.get(
+                    "reasons",
+                    [],
+                ),
+            )
+            item["scenario_key"] = scenario_key
+
+        active.append(item)
+
+    # Oldest signal wins; later copies become DUPLICATE.
+    active.sort(
+        key=lambda x: str(
+            x.get(
+                "created_at",
+                ""
+            )
+        )
+    )
+
+    seen = set()
+    changed = False
+    duplicates = 0
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    for item in active:
+        scenario_key = item.get(
+            "scenario_key"
+        )
+
+        if scenario_key not in seen:
+            seen.add(
+                scenario_key
+            )
+            continue
+
+        item["status"] = "DUPLICATE"
+        item["duplicate_at"] = now
+        item["closed_at"] = now
+        item["result_r"] = None
+        duplicates += 1
+        changed = True
+
+    if changed:
+        _save(
+            data
+        )
+
+    return duplicates
+
+
 # =========================================================
 # REGISTER NEW SIGNAL
 # =========================================================
@@ -1020,6 +1108,8 @@ def update_symbol(
 
 def get_summary() -> dict:
 
+    cleanup_active_duplicates()
+
     data = _load()
 
     signals = data.get(
@@ -1057,26 +1147,46 @@ def get_summary() -> dict:
         if x.get("status") == "AMBIGUOUS"
     ]
 
+    duplicates = [
+        x
+        for x in signals
+        if x.get("status") == "DUPLICATE"
+    ]
+
     filled = [
         x
         for x in signals
         if x.get("entry_filled_at")
     ]
 
+    # Signal-result semantics:
+    # TP1 reached = WIN because profit is taken and SL moves to BE.
+    # A later breakeven close remains a WIN.
+    wins = sum(
+        1
+        for x in signals
+        if x.get("status") != "DUPLICATE"
+        and int(
+            x.get(
+                "highest_tp",
+                0,
+            )
+        ) >= 1
+    )
+
+    # LOSS only when the original SL is hit before TP1.
     losses = sum(
         1
         for x in closed
         if float(
             x.get("result_r") or 0
         ) < 0
-    )
-
-    wins = sum(
-        1
-        for x in closed
-        if float(
-            x.get("result_r") or 0
-        ) > 0
+        and int(
+            x.get(
+                "highest_tp",
+                0,
+            )
+        ) == 0
     )
 
     def tp_count(level: int) -> int:
@@ -1106,11 +1216,11 @@ def get_summary() -> dict:
         ) >= 1
     )
 
-    closed_decided = wins + losses
+    decided = wins + losses
 
     win_rate = (
-        wins / closed_decided * 100.0
-        if closed_decided > 0
+        wins / decided * 100.0
+        if decided > 0
         else 0.0
     )
 
@@ -1150,6 +1260,7 @@ def get_summary() -> dict:
         "closed": len(closed),
         "expired": len(expired),
         "ambiguous": len(ambiguous),
+        "duplicates": len(duplicates),
 
         "filled": len(filled),
 
@@ -1181,5 +1292,10 @@ def get_summary() -> dict:
         "expired_signals": [
             compact(x)
             for x in expired
+        ],
+
+        "duplicate_signals": [
+            compact(x)
+            for x in duplicates
         ],
     }
