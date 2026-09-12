@@ -939,6 +939,29 @@ def get_summary() -> dict:
     return {
         "total": len(signals),
 
+            def compact(x):
+        return {
+            "symbol": x.get("symbol"),
+            "side": x.get("side"),
+            "score": x.get("score"),
+            "status": x.get("status"),
+            "entry": x.get("entry"),
+            "sl": x.get("sl"),
+            "highest_tp": int(
+                x.get("highest_tp", 0)
+            ),
+            "max_r": float(
+                x.get("max_r", 0.0)
+            ),
+            "result_r": x.get("result_r"),
+            "entry_filled_at": x.get(
+                "entry_filled_at"
+            ),
+        }
+
+    return {
+        "total": len(signals),
+
         "pending": len(pending),
         "open": len(open_signals),
         "closed": len(closed),
@@ -955,4 +978,25 @@ def get_summary() -> dict:
         "tp2": tp_count(2),
         "tp3": tp_count(3),
         "tp4": tp_count(4),
+
+        # Detailed lists for Railway logs
+        "pending_signals": [
+            compact(x)
+            for x in pending
+        ],
+
+        "open_signals": [
+            compact(x)
+            for x in open_signals
+        ],
+
+        "closed_signals": [
+            compact(x)
+            for x in closed
+        ],
+
+        "expired_signals": [
+            compact(x)
+            for x in expired
+        ],
     }
