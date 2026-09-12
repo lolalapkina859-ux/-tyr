@@ -99,6 +99,15 @@ def print_tracker_events(
                 f"Result=-1R"
             )
 
+        elif event_type == "BE_HIT":
+            print(
+                f"[TRACKER] "
+                f"{symbol} "
+                f"BREAKEVEN 🟡 "
+                f"after TP{event.get('highest_tp', 1)} "
+                f"Result=0R"
+            )
+
         elif event_type == "EXPIRED":
             print(
                 f"[TRACKER] "
@@ -403,6 +412,10 @@ def run():
             )
 
             print(
+                f"BreakEven: {summary.get('breakeven', 0)}"
+            )
+
+            print(
                 f"WinRate: {summary['win_rate']:.1f}%"
             )
 
@@ -487,6 +500,15 @@ def run():
                         result_text = (
                             f"SL ❌ "
                             f"{float(result_r):+.2f}R"
+                        )
+
+                    elif (
+                        result_r is not None
+                        and float(result_r) == 0.0
+                        and item["highest_tp"] >= 1
+                    ):
+                        result_text = (
+                            "BE 🟡 +0.00R"
                         )
 
                     elif result_r is not None:
