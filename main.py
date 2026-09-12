@@ -25,6 +25,8 @@ from state.tracker import (
     register_signal,
     update_symbol,
     get_summary,
+    build_scenario_key,
+    has_active_scenario,
 )
 
 
@@ -294,6 +296,25 @@ def run():
                         f"{symbol}: signal ignored "
                         f"({sig.score} < "
                         f"{MIN_SIGNAL_SCORE})"
+                    )
+                    continue
+
+                scenario = build_scenario_key(
+                    sig.symbol,
+                    sig.side,
+                    sig.reasons,
+                )
+
+                print(
+                    f"{symbol}: scenario_id={scenario}"
+                )
+
+                if has_active_scenario(
+                    scenario
+                ):
+                    print(
+                        f"{symbol}: active scenario skipped ♻️ "
+                        f"({scenario})"
                     )
                     continue
 
