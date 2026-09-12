@@ -29,6 +29,10 @@ from analysis.liquidity import (
 
 from analysis.structure import local_structure_shift
 from analysis.entries import build_retrace_entry
+from analysis.volume_profile import (
+    build_htf_volume_profiles,
+    volume_confluence,
+)
 
 
 @dataclass
@@ -51,6 +55,18 @@ class Signal:
     zone_high: float
 
     current_price: float
+
+    # Higher-timeframe Fixed Range Volume Profile diagnostics.
+    vp_1d_poc: float | None = None
+    vp_1d_val: float | None = None
+    vp_1d_vah: float | None = None
+
+    vp_4h_poc: float | None = None
+    vp_4h_val: float | None = None
+    vp_4h_vah: float | None = None
+
+    vp_confluence: bool = False
+    vp_score_bonus: int = 0
 
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
@@ -756,6 +772,99 @@ def analyze(
                 "Price moved away from entry — wait for retest"
             )
 
+
+    # =====================================================
+    # HTF FIXED RANGE VOLUME PROFILE — 1D + 4H
+    # =====================================================
+    #
+    # Volume Profile does NOT create a signal by itself.
+    # It only improves an already-confirmed liquidity + BOS setup.
+    #
+    # 1D profile is reconstructed from 4H candles and is therefore
+    # a higher-resolution approximation of a daily FRVP.
+    # =====================================================
+
+    vp_profiles = build_htf_volume_profiles(
+        h4,
+        side,
+    )
+
+    vp_result = volume_confluence(
+        vp_profiles,
+        zone_low,
+        zone_high,
+        entry,
+    )
+
+    vp_1d = vp_profiles.get(
+        "1D"
+    )
+    vp_4h = vp_profiles.get(
+        "4H"
+    )
+
+    vp_bonus = int(
+        vp_result.get(
+            "score_bonus",
+            0,
+        )
+    )
+
+    vp_confluence = bool(
+        vp_result.get(
+            "has_confluence",
+            False,
+        )
+    )
+
+    if vp_confluence:
+        old_entry = float(
+            entry
+        )
+
+        preferred_entry = float(
+            vp_result.get(
+                "preferred_entry",
+                entry,
+            )
+        )
+
+        # Safety: Volume Profile may refine an entry,
+        # but may never pull it outside the original FVG/OB zone.
+        if (
+            zone_low
+            <= preferred_entry
+            <= zone_high
+        ):
+            entry = preferred_entry
+
+        score += vp_bonus
+
+        if "HTF VP" not in entry_type:
+            entry_type = (
+                f"{entry_type} + HTF VP"
+            )
+
+        for match in vp_result.get(
+            "matches",
+            [],
+        ):
+            reasons.append(
+                f"HTF Volume Profile: {match}"
+            )
+
+        if abs(
+            entry - old_entry
+        ) > 1e-12:
+            reasons.append(
+                f"HTF Volume Profile refined entry "
+                f"{old_entry:.8g} -> {entry:.8g}"
+            )
+    else:
+        reasons.append(
+            "HTF Volume Profile: no strong POC/HVN confluence"
+        )
+
     # =====================================================
     # SMART TARGETS
     # =====================================================
@@ -997,4 +1106,39 @@ def analyze(
         zone_high=zone_high,
 
         current_price=current,
+
+        vp_1d_poc=(
+            float(vp_1d["poc"])
+            if vp_1d
+            else None
+        ),
+        vp_1d_val=(
+            float(vp_1d["val"])
+            if vp_1d
+            else None
+        ),
+        vp_1d_vah=(
+            float(vp_1d["vah"])
+            if vp_1d
+            else None
+        ),
+
+        vp_4h_poc=(
+            float(vp_4h["poc"])
+            if vp_4h
+            else None
+        ),
+        vp_4h_val=(
+            float(vp_4h["val"])
+            if vp_4h
+            else None
+        ),
+        vp_4h_vah=(
+            float(vp_4h["vah"])
+            if vp_4h
+            else None
+        ),
+
+        vp_confluence=vp_confluence,
+        vp_score_bonus=vp_bonus,
     )
