@@ -322,6 +322,45 @@ def build_15m_confirmation(
     return lines
 
 
+
+
+# =========================================================
+# HTF VOLUME PROFILE
+# =========================================================
+
+def build_volume_profile_context(
+    sig: Signal
+) -> list[str]:
+
+    lines = []
+
+    if sig.vp_1d_poc is not None:
+        lines.append(
+            f"1D POC: <b>{fmt_price(sig.vp_1d_poc)}</b> "
+            f"• VA: <b>{fmt_price(sig.vp_1d_val)} — "
+            f"{fmt_price(sig.vp_1d_vah)}</b>"
+        )
+
+    if sig.vp_4h_poc is not None:
+        lines.append(
+            f"4H POC: <b>{fmt_price(sig.vp_4h_poc)}</b> "
+            f"• VA: <b>{fmt_price(sig.vp_4h_val)} — "
+            f"{fmt_price(sig.vp_4h_vah)}</b>"
+        )
+
+    if sig.vp_confluence:
+        lines.append(
+            f"✅ POC/HVN подтверждает entry-zone "
+            f"(+{sig.vp_score_bonus} к рейтингу)."
+        )
+    else:
+        lines.append(
+            "⚪ Сильного совпадения POC/HVN с entry-zone нет."
+        )
+
+    return lines
+
+
 # =========================================================
 # FINAL CONCLUSION
 # =========================================================
@@ -461,6 +500,22 @@ def build_message(
     ]
 
     for text in build_15m_confirmation(
+        sig
+    ):
+        lines.append(
+            f"• {text}"
+        )
+
+    # =====================================================
+    # HTF VOLUME PROFILE
+    # =====================================================
+
+    lines += [
+        "",
+        "📊 <b>VOLUME PROFILE 1D / 4H</b>",
+    ]
+
+    for text in build_volume_profile_context(
         sig
     ):
         lines.append(
