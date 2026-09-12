@@ -30,7 +30,7 @@ from state.tracker import (
 )
 
 
-TOP_SYMBOLS_LIMIT = 30
+TOP_SYMBOLS_LIMIT = 50
 TOP_SYMBOLS_REFRESH_SECONDS = 60 * 60
 
 
