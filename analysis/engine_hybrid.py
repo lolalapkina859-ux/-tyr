@@ -10,6 +10,7 @@ from analysis.liquidity import (
 )
 from analysis.targets import build_hybrid_targets
 from analysis.volume_profile import build_htf_volume_profiles
+from analysis.watch_alert import maybe_send_watch
 
 
 def analyze(symbol, df4h, df15) -> Signal | None:
@@ -31,6 +32,19 @@ def analyze(symbol, df4h, df15) -> Signal | None:
         | pivot_levels(m15, 12, 3)
     )
     all_levels = levels4 | levels15
+
+    # =====================================================
+    # EARLY SETUP WATCH
+    # =====================================================
+    # If important HTF liquidity has already been swept/reclaimed,
+    # but 15M BOS is not confirmed yet, send a one-time early alert.
+    # This does NOT register anything in tracker/statistics.
+    maybe_send_watch(
+        symbol=symbol,
+        sig=sig,
+        h4=h4,
+        levels4=levels4,
+    )
 
     liquidity_targets = nearest_targets(
         all_levels,
