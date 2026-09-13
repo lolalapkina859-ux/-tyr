@@ -33,16 +33,13 @@ def analyze(symbol, df4h, df15) -> Signal | None:
     )
     all_levels = levels4 | levels15
 
-    # =====================================================
-    # EARLY SETUP WATCH
-    # =====================================================
-    # If important HTF liquidity has already been swept/reclaimed,
-    # but 15M BOS is not confirmed yet, send a one-time early alert.
-    # This does NOT register anything in tracker/statistics.
+    # Strict WATCH V2: major HTF liquidity + momentum/reaction,
+    # before 15M BOS confirmation. Never enters tracker/statistics.
     maybe_send_watch(
         symbol=symbol,
         sig=sig,
         h4=h4,
+        m15=m15,
         levels4=levels4,
     )
 
