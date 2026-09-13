@@ -8,6 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from analysis.engine_hybrid import analyze
+from config import MIN_SIGNAL_SCORE
 from state.tracker import build_scenario_key
 
 
@@ -123,9 +124,14 @@ def run_backtest(
     warmup_15m: int = 1600,
     max_4h_bars: int = 400,
     max_15m_bars: int = 500,
+    min_signal_score: int = MIN_SIGNAL_SCORE,
 ) -> list[BacktestTrade]:
     """
     Candle-by-candle historical replay using the same live hybrid analyzer.
+
+    The live scanner applies MIN_SIGNAL_SCORE after analyze() returns a setup.
+    Backtest must mirror that gate exactly; low-score WATCH/setup candidates are
+    therefore ignored and never become historical trades.
 
     1600 x 15m ~= 100 x 4H bars, which is enough to initialize the engine.
     As replay advances, 4H context grows naturally up to max_4h_bars=400.
@@ -237,6 +243,10 @@ def run_backtest(
         if sig is None:
             continue
 
+        score = int(getattr(sig, "score", 0))
+        if score < int(min_signal_score):
+            continue
+
         targets = _target_prices(sig)
         if not targets:
             continue
@@ -246,7 +256,7 @@ def run_backtest(
 
         active = {
             "side": str(sig.side),
-            "score": int(getattr(sig, "score", 0)),
+            "score": score,
             "signal_time": now,
             "entry_time": None,
             "exit_time": None,
@@ -298,15 +308,22 @@ def main() -> None:
     parser.add_argument("--csv", required=True, help="15m OHLCV CSV with time/open/high/low/close/volume")
     parser.add_argument("--out", default="backtest_results.csv")
     parser.add_argument("--warmup", type=int, default=1600, help="15m warmup candles; 1600 ~= 100 x 4H")
+    parser.add_argument("--min-score", type=int, default=MIN_SIGNAL_SCORE)
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
-    trades = run_backtest(args.symbol.upper(), df, warmup_15m=args.warmup)
+    trades = run_backtest(
+        args.symbol.upper(),
+        df,
+        warmup_15m=args.warmup,
+        min_signal_score=args.min_score,
+    )
 
     out = Path(args.out)
     pd.DataFrame([asdict(t) for t in trades]).to_csv(out, index=False)
 
     print("\n=== TRADE VISION BACKTEST ===")
+    print(f"minimum_score: {args.min_score}")
     for key, value in summarize(trades).items():
         print(f"{key}: {value}")
     print(f"results: {out.resolve()}")
