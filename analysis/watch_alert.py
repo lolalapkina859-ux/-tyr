@@ -9,26 +9,11 @@ import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from analysis.liquidity import detect_event
 
-
-# =========================================================
-# EARLY HTF LIQUIDITY WATCH
-# =========================================================
-#
-# This is NOT a trade signal and is never registered in tracker.
-# It only warns that important HTF liquidity has been swept/reclaimed
-# and that the bot is now waiting for 15M structure confirmation.
-# =========================================================
-
-WATCH_LEVELS = {
-    "PMH",
-    "PML",
-    "PWH",
-    "PWL",
-    "PDH",
-    "PDL",
-    "PSH",
-    "PSL",
-}
+# WATCH V2: only major monthly/weekly/daily liquidity.
+# PSH/PSL are intentionally excluded to reduce noise.
+MAJOR_LEVELS = {"PMH", "PML", "PWH", "PWL"}
+DAILY_LEVELS = {"PDH", "PDL"}
+WATCH_LEVELS = MAJOR_LEVELS | DAILY_LEVELS
 
 LEVEL_NAMES = {
     "PMH": "максимум прошлого месяца",
@@ -37,99 +22,53 @@ LEVEL_NAMES = {
     "PWL": "минимум прошлой недели",
     "PDH": "максимум прошлого дня",
     "PDL": "минимум прошлого дня",
-    "PSH": "предыдущий swing high",
-    "PSL": "предыдущий swing low",
 }
 
-DATA_DIR = Path(
-    os.getenv(
-        "RAILWAY_VOLUME_MOUNT_PATH",
-        "/data",
-    )
-)
-
+DATA_DIR = Path(os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "/data"))
 try:
-    DATA_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
     pass
 
-WATCH_STATE_PATH = (
-    DATA_DIR
-    / "watch_state.json"
-)
+WATCH_STATE_PATH = DATA_DIR / "watch_state_v2.json"
 
 
 def _fmt_price(value: float) -> str:
     value = float(value)
-
     if value >= 1000:
         return f"{value:,.2f}"
-
     if value >= 1:
         return f"{value:.4f}"
-
-    return (
-        f"{value:.8f}"
-        .rstrip("0")
-        .rstrip(".")
-    )
+    return f"{value:.8f}".rstrip("0").rstrip(".")
 
 
 def _load_state() -> dict:
     if not WATCH_STATE_PATH.exists():
         return {}
-
     try:
-        data = json.loads(
-            WATCH_STATE_PATH.read_text(
-                encoding="utf-8"
-            )
-        )
-
-        if isinstance(data, dict):
-            return data
-
+        data = json.loads(WATCH_STATE_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception as exc:
-        print(
-            f"[WATCH] state load error: {exc}"
-        )
-
-    return {}
+        print(f"[WATCH V2] state load error: {exc}")
+        return {}
 
 
 def _save_state(state: dict) -> None:
     if len(state) > 3000:
-        keys = list(
-            state.keys()
-        )[-2000:]
-
-        state = {
-            key: state[key]
-            for key in keys
-        }
-
+        keys = list(state.keys())[-2000:]
+        state = {key: state[key] for key in keys}
     try:
         WATCH_STATE_PATH.write_text(
-            json.dumps(
-                state,
-                indent=2,
-                ensure_ascii=False,
-            ),
+            json.dumps(state, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     except Exception as exc:
-        print(
-            f"[WATCH] state save error: {exc}"
-        )
+        print(f"[WATCH V2] state save error: {exc}")
 
 
 def _find_htf_level(sig) -> str | None:
     for reason in sig.reasons:
         parts = str(reason).split()
-
         if (
             len(parts) >= 3
             and parts[0] == "4H"
@@ -137,24 +76,56 @@ def _find_htf_level(sig) -> str | None:
             and "liquidity sweep" in str(reason)
         ):
             return parts[1]
-
     return None
 
 
 def _structure_missing(sig) -> bool:
     return any(
-        "15M structure NOT confirmed"
-        in str(reason)
+        "15M structure NOT confirmed" in str(reason)
         for reason in sig.reasons
     )
 
 
-def _event_time_iso(
-    h4,
-    event: dict,
-) -> str:
-    bar = event.get("bar")
+def _momentum_ok(df, side: str) -> bool:
+    """Major PM/PW WATCH needs 4H momentum already leaning with the scenario."""
+    if df is None or len(df) < 5:
+        return False
+    if side == "LONG":
+        mf_ok = df["mf"].iloc[-2] > df["mf"].iloc[-3] > df["mf"].iloc[-4]
+        wt_ok = df["wt1"].iloc[-2] > df["wt1"].iloc[-3]
+    else:
+        mf_ok = df["mf"].iloc[-2] < df["mf"].iloc[-3] < df["mf"].iloc[-4]
+        wt_ok = df["wt1"].iloc[-2] < df["wt1"].iloc[-3]
+    return bool(mf_ok or wt_ok)
 
+
+def _daily_reaction_ok(m15, side: str) -> bool:
+    """PDH/PDL are common: demand both 15M WT and Money Flow reaction."""
+    if m15 is None or len(m15) < 5:
+        return False
+    if side == "LONG":
+        return bool(
+            m15["wt1"].iloc[-2] > m15["wt1"].iloc[-3]
+            and m15["mf"].iloc[-2] > m15["mf"].iloc[-3]
+        )
+    return bool(
+        m15["wt1"].iloc[-2] < m15["wt1"].iloc[-3]
+        and m15["mf"].iloc[-2] < m15["mf"].iloc[-3]
+    )
+
+
+def _not_too_late(m15, current_price: float, level_price: float) -> bool:
+    """Skip WATCH if price already ran too far away from reclaimed liquidity."""
+    try:
+        atr15 = float(m15["atr"].iloc[-2])
+    except Exception:
+        return False
+    max_distance = max(2.0 * atr15, abs(float(current_price)) * 0.015)
+    return abs(float(current_price) - float(level_price)) <= max_distance
+
+
+def _event_time_iso(h4, event: dict) -> str:
+    bar = event.get("bar")
     try:
         row = h4.loc[bar]
     except Exception:
@@ -162,175 +133,92 @@ def _event_time_iso(
             row = h4.iloc[int(bar)]
         except Exception:
             row = h4.iloc[-2]
-
     value = row["time"]
-
     try:
         return value.isoformat()
     except Exception:
         return str(value)
 
 
-def _build_message(
-    symbol: str,
-    side: str,
-    level: str,
-    level_price: float,
-    current_price: float,
-) -> str:
-    icon = (
-        "🟢"
-        if side == "LONG"
-        else "🔴"
-    )
+def _build_message(symbol, side, level, level_price, current_price) -> str:
+    icon = "🟢" if side == "LONG" else "🔴"
+    direction = "ниже" if side == "LONG" else "выше"
+    reclaim_text = "вернулась выше уровня" if side == "LONG" else "вернулась ниже уровня"
+    description = LEVEL_NAMES.get(level, level)
 
-    direction = (
-        "ниже"
-        if side == "LONG"
-        else "выше"
-    )
-
-    reclaim_text = (
-        "вернулась выше уровня"
-        if side == "LONG"
-        else "вернулась ниже уровня"
-    )
-
-    description = LEVEL_NAMES.get(
-        level,
-        level,
-    )
-
-    return "\n".join(
-        [
-            f"👀 <b>SETUP WATCH — #{symbol}</b>",
-            "",
-            f"{icon} Возможный <b>{side}</b>-сценарий формируется.",
-            "",
-            "💧 <b>СНЯТА ОСНОВНАЯ HTF ЛИКВИДНОСТЬ</b>",
-            (
-                f"• Цена сняла ликвидность {direction} "
-                f"<b>{level}</b> — {description}."
-            ),
-            (
-                f"• Уровень: <b>{_fmt_price(level_price)}</b>"
-            ),
-            (
-                f"• Current: <b>{_fmt_price(current_price)}</b>"
-            ),
-            (
-                f"• Цена {reclaim_text}."
-            ),
-            "",
-            "⏳ <b>ЧТО ЖДЁМ</b>",
-            "• bullish/bearish BOS на 15M по направлению сценария;",
-            "• подтверждение momentum / Money Flow;",
-            "• FVG / Order Block для точного LIMIT-входа.",
-            "",
-            "⚠️ <b>СЕЙЧАС НЕ ВХОДИТЬ</b>",
-            "Это раннее предупреждение, а не торговый сигнал.",
-            "",
-            "👁 <b>TRADE VISION 24/7</b>",
-            "<i>Liquidity taken → now waiting for confirmation</i>",
-        ]
-    )
+    return "\n".join([
+        f"👀 <b>SETUP WATCH — #{symbol}</b>",
+        "",
+        f"{icon} Возможный <b>{side}</b>-сценарий формируется.",
+        "",
+        "💧 <b>СНЯТА ОСНОВНАЯ HTF ЛИКВИДНОСТЬ</b>",
+        f"• Цена сняла ликвидность {direction} <b>{level}</b> — {description}.",
+        f"• Уровень: <b>{_fmt_price(level_price)}</b>",
+        f"• Current: <b>{_fmt_price(current_price)}</b>",
+        f"• Цена {reclaim_text}.",
+        "",
+        "⏳ <b>ЧТО ЖДЁМ</b>",
+        "• BOS / CHoCH на 15M по направлению сценария;",
+        "• FVG / Order Block для точного LIMIT-входа.",
+        "",
+        "⚠️ <b>СЕЙЧАС НЕ ВХОДИТЬ</b>",
+        "Reaction/momentum уже есть, но структура входа ещё не подтверждена.",
+        "",
+        "👁 <b>TRADE VISION 24/7</b>",
+        "<i>Liquidity taken → reaction → waiting for BOS</i>",
+    ])
 
 
-def maybe_send_watch(
-    symbol: str,
-    sig,
-    h4,
-    levels4: dict,
-) -> bool:
+def maybe_send_watch(symbol: str, sig, h4, m15, levels4: dict) -> bool:
     """
-    Send exactly one early alert per HTF sweep candle.
-
-    Conditions:
-        - important 4H liquidity sweep/reclaim exists;
-        - 15M BOS/structure is NOT confirmed yet;
-        - alert for this exact sweep candle was not sent before.
-
-    This function never writes to signal tracker/statistics.
+    WATCH V2 filters:
+      PM/PW -> sweep + reclaim + aligned 4H momentum.
+      PDH/PDL -> same + 15M WT/MF reaction.
+      PSH/PSL -> no WATCH.
+      All -> skip late alerts + persistent one-alert-per-sweep dedupe.
     """
-
     if not _structure_missing(sig):
         return False
 
     level = _find_htf_level(sig)
-
     if level is None:
         return False
 
-    expected_type = (
-        "sweep_low"
-        if sig.side == "LONG"
-        else "sweep_high"
-    )
+    if not _momentum_ok(h4, sig.side):
+        return False
 
+    if level in DAILY_LEVELS and not _daily_reaction_ok(m15, sig.side):
+        return False
+
+    expected_type = "sweep_low" if sig.side == "LONG" else "sweep_high"
     matching = [
         event
-        for event in detect_event(
-            h4,
-            levels4,
-            lookback=3,
-        )
-        if (
-            event.get("type")
-            == expected_type
-            and event.get("level")
-            == level
-        )
+        for event in detect_event(h4, levels4, lookback=3)
+        if event.get("type") == expected_type and event.get("level") == level
     ]
-
     if not matching:
         return False
 
     event = matching[-1]
+    level_price = float(event["price"])
+    current_price = float(sig.current_price)
 
-    event_time = _event_time_iso(
-        h4,
-        event,
-    )
+    if not _not_too_late(m15, current_price, level_price):
+        print(f"[WATCH V2] {symbol} {sig.side} {level} skipped: late")
+        return False
 
-    key = (
-        f"WATCH:{symbol}:"
-        f"{sig.side}:"
-        f"{level}:"
-        f"{event_time}"
-    )
-
+    event_time = _event_time_iso(h4, event)
+    key = f"WATCH_V2:{symbol}:{sig.side}:{level}:{event_time}"
     state = _load_state()
-
     if state.get(key):
         return False
 
-    if (
-        not TELEGRAM_BOT_TOKEN
-        or not TELEGRAM_CHAT_ID
-    ):
-        print(
-            f"[WATCH] Telegram token/chat id missing: {key}"
-        )
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print(f"[WATCH V2] Telegram token/chat id missing: {key}")
         return False
 
-    text = _build_message(
-        symbol=symbol,
-        side=sig.side,
-        level=level,
-        level_price=float(
-            event["price"]
-        ),
-        current_price=float(
-            sig.current_price
-        ),
-    )
-
-    url = (
-        "https://api.telegram.org/bot"
-        f"{TELEGRAM_BOT_TOKEN}"
-        "/sendMessage"
-    )
-
+    text = _build_message(symbol, sig.side, level, level_price, current_price)
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
@@ -339,32 +227,15 @@ def maybe_send_watch(
     }
 
     try:
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=15,
-        )
-
+        response = requests.post(url, json=payload, timeout=15)
         if not response.ok:
-            print(
-                "[WATCH] Telegram error:",
-                response.text,
-            )
+            print("[WATCH V2] Telegram error:", response.text)
             return False
 
         state[key] = True
-        _save_state(
-            state
-        )
-
-        print(
-            f"[WATCH] {symbol} {sig.side} {level} sent 👀"
-        )
-
+        _save_state(state)
+        print(f"[WATCH V2] {symbol} {sig.side} {level} sent 👀")
         return True
-
     except Exception as exc:
-        print(
-            f"[WATCH] Telegram exception: {exc}"
-        )
+        print(f"[WATCH V2] Telegram exception: {exc}")
         return False
