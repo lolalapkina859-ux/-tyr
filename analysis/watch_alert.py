@@ -9,8 +9,9 @@ import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from analysis.liquidity import detect_event
 
-# WATCH V2: only major monthly/weekly/daily liquidity.
+# WATCH V3: only major monthly/weekly/daily liquidity.
 # PSH/PSL are intentionally excluded to reduce noise.
+# ACTIVE ENTRY SIGNAL always has priority over WATCH.
 MAJOR_LEVELS = {"PMH", "PML", "PWH", "PWL"}
 DAILY_LEVELS = {"PDH", "PDL"}
 WATCH_LEVELS = MAJOR_LEVELS | DAILY_LEVELS
@@ -30,7 +31,8 @@ try:
 except Exception:
     pass
 
-WATCH_STATE_PATH = DATA_DIR / "watch_state_v2.json"
+WATCH_STATE_PATH = DATA_DIR / "watch_state_v3.json"
+SIGNAL_STATE_PATH = DATA_DIR / "signal_stats_v2.json"
 
 
 def _fmt_price(value: float) -> str:
@@ -49,7 +51,7 @@ def _load_state() -> dict:
         data = json.loads(WATCH_STATE_PATH.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception as exc:
-        print(f"[WATCH V2] state load error: {exc}")
+        print(f"[WATCH V3] state load error: {exc}")
         return {}
 
 
@@ -63,7 +65,42 @@ def _save_state(state: dict) -> None:
             encoding="utf-8",
         )
     except Exception as exc:
-        print(f"[WATCH V2] state save error: {exc}")
+        print(f"[WATCH V3] state save error: {exc}")
+
+
+def _has_active_trade(symbol: str) -> bool:
+    """
+    ACTIVE ENTRY SIGNAL > WATCH.
+
+    If this symbol already has ANY PENDING or OPEN real trade signal,
+    suppress all new WATCH alerts for the symbol, regardless of side
+    or liquidity thesis. This avoids contradictory LONG/SHORT WATCH
+    messages while an actual setup is still active.
+    """
+    if not SIGNAL_STATE_PATH.exists():
+        return False
+
+    try:
+        data = json.loads(
+            SIGNAL_STATE_PATH.read_text(
+                encoding="utf-8"
+            )
+        )
+    except Exception as exc:
+        print(f"[WATCH V3] tracker state load error: {exc}")
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    for item in data.get("signals", []):
+        if str(item.get("symbol", "")) != str(symbol):
+            continue
+
+        if item.get("status") in ("PENDING", "OPEN"):
+            return True
+
+    return False
 
 
 def _find_htf_level(sig) -> str | None:
@@ -171,12 +208,18 @@ def _build_message(symbol, side, level, level_price, current_price) -> str:
 
 def maybe_send_watch(symbol: str, sig, h4, m15, levels4: dict) -> bool:
     """
-    WATCH V2 filters:
+    WATCH V3 filters:
+      ACTIVE PENDING/OPEN trade on symbol -> NO WATCH at all.
       PM/PW -> sweep + reclaim + aligned 4H momentum.
       PDH/PDL -> same + 15M WT/MF reaction.
       PSH/PSL -> no WATCH.
       All -> skip late alerts + persistent one-alert-per-sweep dedupe.
     """
+    # A real trade setup always has priority over an early WATCH.
+    if _has_active_trade(symbol):
+        print(f"[WATCH V3] {symbol} skipped: active trade signal")
+        return False
+
     if not _structure_missing(sig):
         return False
 
@@ -204,17 +247,17 @@ def maybe_send_watch(symbol: str, sig, h4, m15, levels4: dict) -> bool:
     current_price = float(sig.current_price)
 
     if not _not_too_late(m15, current_price, level_price):
-        print(f"[WATCH V2] {symbol} {sig.side} {level} skipped: late")
+        print(f"[WATCH V3] {symbol} {sig.side} {level} skipped: late")
         return False
 
     event_time = _event_time_iso(h4, event)
-    key = f"WATCH_V2:{symbol}:{sig.side}:{level}:{event_time}"
+    key = f"WATCH_V3:{symbol}:{sig.side}:{level}:{event_time}"
     state = _load_state()
     if state.get(key):
         return False
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print(f"[WATCH V2] Telegram token/chat id missing: {key}")
+        print(f"[WATCH V3] Telegram token/chat id missing: {key}")
         return False
 
     text = _build_message(symbol, sig.side, level, level_price, current_price)
@@ -229,13 +272,13 @@ def maybe_send_watch(symbol: str, sig, h4, m15, levels4: dict) -> bool:
     try:
         response = requests.post(url, json=payload, timeout=15)
         if not response.ok:
-            print("[WATCH V2] Telegram error:", response.text)
+            print("[WATCH V3] Telegram error:", response.text)
             return False
 
         state[key] = True
         _save_state(state)
-        print(f"[WATCH V2] {symbol} {sig.side} {level} sent 👀")
+        print(f"[WATCH V3] {symbol} {sig.side} {level} sent 👀")
         return True
     except Exception as exc:
-        print(f"[WATCH V2] Telegram exception: {exc}")
+        print(f"[WATCH V3] Telegram exception: {exc}")
         return False
