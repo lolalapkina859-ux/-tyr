@@ -12,7 +12,7 @@ from exchange.bybit import (
     get_top_symbols,
 )
 
-from analysis.engine import analyze
+from analysis.engine_hybrid import analyze
 from telegram.notifier import send_signal
 
 from state.store import (
