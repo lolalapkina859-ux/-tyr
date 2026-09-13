@@ -13,7 +13,20 @@ from analysis.volume_profile import build_htf_volume_profiles
 from analysis.watch_alert import maybe_send_watch
 
 
-def analyze(symbol, df4h, df15) -> Signal | None:
+def analyze(
+    symbol,
+    df4h,
+    df15,
+    *,
+    emit_watch: bool = True,
+) -> Signal | None:
+    """
+    Run the live Trade Vision analysis pipeline.
+
+    ``emit_watch`` defaults to True so the live bot behaviour is unchanged.
+    Historical replay/backtests pass False to keep analysis pure and avoid
+    Telegram/state side effects while walking old candles.
+    """
     sig = base_analyze(symbol, df4h, df15)
     if sig is None:
         return None
@@ -35,13 +48,15 @@ def analyze(symbol, df4h, df15) -> Signal | None:
 
     # Strict WATCH V2: major HTF liquidity + momentum/reaction,
     # before 15M BOS confirmation. Never enters tracker/statistics.
-    maybe_send_watch(
-        symbol=symbol,
-        sig=sig,
-        h4=h4,
-        m15=m15,
-        levels4=levels4,
-    )
+    # Disabled during historical replay to prevent Telegram/state side effects.
+    if emit_watch:
+        maybe_send_watch(
+            symbol=symbol,
+            sig=sig,
+            h4=h4,
+            m15=m15,
+            levels4=levels4,
+        )
 
     liquidity_targets = nearest_targets(
         all_levels,
