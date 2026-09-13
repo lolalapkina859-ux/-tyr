@@ -177,6 +177,527 @@ def _wt_turning_down(df: pd.DataFrame) -> bool:
     )
 
 
+
+# =========================================================
+# SMART STRUCTURAL STOP LOSS
+# =========================================================
+
+_LONG_PROTECT_LEVELS = {
+    "PML",
+    "PWL",
+    "PDL",
+    "PSL",
+    "ASIAL",
+    "LONL",
+    "NYL",
+}
+
+_SHORT_PROTECT_LEVELS = {
+    "PMH",
+    "PWH",
+    "PDH",
+    "PSH",
+    "ASIAH",
+    "LONH",
+    "NYH",
+}
+
+
+def _level_price(value) -> float | None:
+    """
+    previous_period_levels/session_levels/pivot_levels normally
+    return numeric prices. This helper also tolerates dict values.
+    """
+    if isinstance(
+        value,
+        (int, float),
+    ):
+        return float(value)
+
+    if isinstance(
+        value,
+        dict,
+    ):
+        for key in (
+            "price",
+            "value",
+            "level",
+        ):
+            if key in value:
+                try:
+                    return float(
+                        value[key]
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+    try:
+        return float(value)
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+
+def _smart_structural_sl(
+    side: str,
+    entry: float,
+    zone_low: float,
+    zone_high: float,
+    reclaim: float,
+    atr15: float,
+    m15: pd.DataFrame,
+    all_levels: dict,
+    retrace: dict | None,
+) -> tuple[float, str]:
+    """
+    Smart SL logic.
+
+    LONG:
+        stop below the protected structure:
+        OB/FVG low, recent swing low, liquidity/reclaim level,
+        and the nearest relevant PDL/PWL/PSL/session-low cluster.
+
+    SHORT:
+        mirrored logic above structure.
+
+    The stop also receives a volatility buffer and a minimum
+    distance from entry, so it is not placed directly in obvious
+    liquidity where a normal wick can remove the position.
+    """
+
+    entry = float(entry)
+    zone_low = float(zone_low)
+    zone_high = float(zone_high)
+    reclaim = float(reclaim)
+    atr15 = float(atr15)
+
+    # We only use completed 15M candles for structural anchors.
+    closed15 = (
+        m15.iloc[:-1]
+        .copy()
+    )
+
+    recent = (
+        closed15.tail(16)
+        if len(closed15) >= 16
+        else closed15
+    )
+
+    # Structural levels too far away should not make the SL absurdly wide.
+    max_level_distance = max(
+        5.0 * atr15,
+        0.020 * entry,
+    )
+
+    # Buffer behind the invalidation structure.
+    # The percentage floor helps high-priced/low-ATR instruments such as BTC.
+    buffer = max(
+        0.35 * atr15,
+        0.0015 * entry,
+    )
+
+    # Avoid microscopic stops even when the nearest OB is extremely tight.
+    min_risk = max(
+        0.65 * atr15,
+        0.0025 * entry,
+    )
+
+    ob = (
+        retrace.get("order_block")
+        if retrace
+        else None
+    )
+
+    fvg = (
+        retrace.get("fvg")
+        if retrace
+        else None
+    )
+
+    if side == "LONG":
+
+        candidates: list[
+            tuple[float, str]
+        ] = []
+
+        if not recent.empty:
+            recent_low = float(
+                recent["low"].min()
+            )
+
+            if (
+                recent_low < entry
+                and entry - recent_low
+                <= max_level_distance
+            ):
+                candidates.append(
+                    (
+                        recent_low,
+                        "15M swing low",
+                    )
+                )
+
+        for price, label in (
+            (
+                zone_low,
+                "entry zone low",
+            ),
+            (
+                reclaim,
+                "liquidity reclaim",
+            ),
+        ):
+            if (
+                price < entry
+                and entry - price
+                <= max_level_distance
+            ):
+                candidates.append(
+                    (
+                        float(price),
+                        label,
+                    )
+                )
+
+        if ob:
+            ob_low = float(
+                ob["low"]
+            )
+
+            if (
+                ob_low < entry
+                and entry - ob_low
+                <= max_level_distance
+            ):
+                candidates.append(
+                    (
+                        ob_low,
+                        "Order Block low",
+                    )
+                )
+
+        if fvg:
+            fvg_low = float(
+                fvg["low"]
+            )
+
+            if (
+                fvg_low < entry
+                and entry - fvg_low
+                <= max_level_distance
+            ):
+                candidates.append(
+                    (
+                        fvg_low,
+                        "FVG low",
+                    )
+                )
+
+        structural_levels = []
+
+        for name, value in (
+            all_levels.items()
+        ):
+            if (
+                name
+                not in _LONG_PROTECT_LEVELS
+            ):
+                continue
+
+            price = _level_price(
+                value
+            )
+
+            if price is None:
+                continue
+
+            if (
+                price < entry
+                and entry - price
+                <= max_level_distance
+            ):
+                structural_levels.append(
+                    (
+                        price,
+                        name,
+                    )
+                )
+
+        # Nearest support under entry.
+        # If several levels form a tight cluster, protect below
+        # the deepest level of that cluster.
+        if structural_levels:
+            structural_levels.sort(
+                key=lambda x: x[0],
+                reverse=True,
+            )
+
+            nearest_price = (
+                structural_levels[0][0]
+            )
+
+            cluster = [
+                item
+                for item in structural_levels
+                if (
+                    nearest_price
+                    - item[0]
+                    <= 0.50 * atr15
+                )
+            ]
+
+            cluster_price = min(
+                item[0]
+                for item in cluster
+            )
+
+            cluster_names = "/".join(
+                item[1]
+                for item in cluster
+            )
+
+            candidates.append(
+                (
+                    cluster_price,
+                    f"HTF/LTF liquidity {cluster_names}",
+                )
+            )
+
+        if not candidates:
+            base = (
+                entry - min_risk
+            )
+            base_reason = (
+                "minimum volatility distance"
+            )
+        else:
+            # Stop must be behind every relevant nearby structure,
+            # not just behind the entry-zone boundary.
+            base, base_reason = min(
+                candidates,
+                key=lambda x: x[0],
+            )
+
+        sl = (
+            float(base)
+            - buffer
+        )
+
+        # Hard anti-tight-stop guard.
+        if (
+            entry - sl
+            < min_risk
+        ):
+            sl = (
+                entry
+                - min_risk
+            )
+
+            base_reason += (
+                " + minimum risk guard"
+            )
+
+        reason = (
+            f"Smart SL below {base_reason}; "
+            f"buffer={buffer:.8g}"
+        )
+
+        return (
+            float(sl),
+            reason,
+        )
+
+    # =====================================================
+    # SHORT
+    # =====================================================
+
+    candidates = []
+
+    if not recent.empty:
+        recent_high = float(
+            recent["high"].max()
+        )
+
+        if (
+            recent_high > entry
+            and recent_high - entry
+            <= max_level_distance
+        ):
+            candidates.append(
+                (
+                    recent_high,
+                    "15M swing high",
+                )
+            )
+
+    for price, label in (
+        (
+            zone_high,
+            "entry zone high",
+        ),
+        (
+            reclaim,
+            "liquidity reclaim",
+        ),
+    ):
+        if (
+            price > entry
+            and price - entry
+            <= max_level_distance
+        ):
+            candidates.append(
+                (
+                    float(price),
+                    label,
+                )
+            )
+
+    if ob:
+        ob_high = float(
+            ob["high"]
+        )
+
+        if (
+            ob_high > entry
+            and ob_high - entry
+            <= max_level_distance
+        ):
+            candidates.append(
+                (
+                    ob_high,
+                    "Order Block high",
+                )
+            )
+
+    if fvg:
+        fvg_high = float(
+            fvg["high"]
+        )
+
+        if (
+            fvg_high > entry
+            and fvg_high - entry
+            <= max_level_distance
+        ):
+            candidates.append(
+                (
+                    fvg_high,
+                    "FVG high",
+                )
+            )
+
+    structural_levels = []
+
+    for name, value in (
+        all_levels.items()
+    ):
+        if (
+            name
+            not in _SHORT_PROTECT_LEVELS
+        ):
+            continue
+
+        price = _level_price(
+            value
+        )
+
+        if price is None:
+            continue
+
+        if (
+            price > entry
+            and price - entry
+            <= max_level_distance
+        ):
+            structural_levels.append(
+                (
+                    price,
+                    name,
+                )
+            )
+
+    if structural_levels:
+        structural_levels.sort(
+            key=lambda x: x[0]
+        )
+
+        nearest_price = (
+            structural_levels[0][0]
+        )
+
+        cluster = [
+            item
+            for item in structural_levels
+            if (
+                item[0]
+                - nearest_price
+                <= 0.50 * atr15
+            )
+        ]
+
+        cluster_price = max(
+            item[0]
+            for item in cluster
+        )
+
+        cluster_names = "/".join(
+            item[1]
+            for item in cluster
+        )
+
+        candidates.append(
+            (
+                cluster_price,
+                f"HTF/LTF liquidity {cluster_names}",
+            )
+        )
+
+    if not candidates:
+        base = (
+            entry + min_risk
+        )
+        base_reason = (
+            "minimum volatility distance"
+        )
+    else:
+        base, base_reason = max(
+            candidates,
+            key=lambda x: x[0],
+        )
+
+    sl = (
+        float(base)
+        + buffer
+    )
+
+    if (
+        sl - entry
+        < min_risk
+    ):
+        sl = (
+            entry
+            + min_risk
+        )
+
+        base_reason += (
+            " + minimum risk guard"
+        )
+
+    reason = (
+        f"Smart SL above {base_reason}; "
+        f"buffer={buffer:.8g}"
+    )
+
+    return (
+        float(sl),
+        reason,
+    )
+
 def analyze(
     symbol: str,
     df4h: pd.DataFrame,
@@ -873,6 +1394,46 @@ def analyze(
         levels4
         | levels15
     )
+
+    # =====================================================
+    # SMART STRUCTURAL SL
+    # =====================================================
+    #
+    # Recalculate SL AFTER Volume Profile has had a chance
+    # to refine the final entry price.
+    #
+    # The old SL above is only a provisional fallback.
+    # From here onward risk/R:R/targets use the Smart SL.
+    # =====================================================
+
+    sl, smart_sl_reason = (
+        _smart_structural_sl(
+            side=side,
+            entry=entry,
+            zone_low=zone_low,
+            zone_high=zone_high,
+            reclaim=reclaim,
+            atr15=atr15,
+            m15=m15,
+            all_levels=all_levels,
+            retrace=retrace,
+        )
+    )
+
+    reasons.append(
+        smart_sl_reason
+    )
+
+    if side == "LONG":
+        invalidation = (
+            f"15M close below "
+            f"{sl:.8g}"
+        )
+    else:
+        invalidation = (
+            f"15M close above "
+            f"{sl:.8g}"
+        )
 
     risk = abs(
         entry - sl
