@@ -16,6 +16,8 @@ jobs:
   backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      MIN_SIGNAL_SCORE: "70"
 
     steps:
       - name: Checkout
