@@ -120,12 +120,15 @@ def run_backtest(
     symbol: str,
     df15: pd.DataFrame,
     *,
-    warmup_15m: int = 6400,
+    warmup_15m: int = 1600,
     max_4h_bars: int = 400,
     max_15m_bars: int = 500,
 ) -> list[BacktestTrade]:
     """
     Candle-by-candle historical replay using the same live hybrid analyzer.
+
+    1600 x 15m ~= 100 x 4H bars, which is enough to initialize the engine.
+    As replay advances, 4H context grows naturally up to max_4h_bars=400.
 
     The last candle in every slice is treated as the currently forming candle,
     matching the live engine's use of the previous closed candle. This avoids
@@ -178,7 +181,6 @@ def run_backtest(
 
                 new_highest = max(active["highest_tp"], tp_hit)
 
-                # Candle OHLC cannot tell whether SL/BE or a new TP happened first.
                 if sl_hit and new_highest > active["highest_tp"]:
                     active["status"] = "AMBIGUOUS"
                     active["exit_time"] = now
@@ -193,9 +195,7 @@ def run_backtest(
                         active["exit_time"] = now
 
             if active["status"] in {"CLOSED", "EXPIRED", "AMBIGUOUS"}:
-                if active["status"] == "EXPIRED":
-                    realized_r = 0.0
-                elif active["status"] == "AMBIGUOUS":
+                if active["status"] in {"EXPIRED", "AMBIGUOUS"}:
                     realized_r = 0.0
                 else:
                     realized_r = _realized_r(
@@ -297,7 +297,7 @@ def main() -> None:
     parser.add_argument("--symbol", required=True, help="Example: BTCUSDT")
     parser.add_argument("--csv", required=True, help="15m OHLCV CSV with time/open/high/low/close/volume")
     parser.add_argument("--out", default="backtest_results.csv")
-    parser.add_argument("--warmup", type=int, default=6400, help="15m warmup candles; 6400 ~= 400 x 4H")
+    parser.add_argument("--warmup", type=int, default=1600, help="15m warmup candles; 1600 ~= 100 x 4H")
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
