@@ -1,51 +1,57 @@
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import datetime, timezone
+from dataclasses import asdict
+from pathlib import Path
 
-from backtest.download import download_klines_range
-from backtest.runner import run_backtest
+import pandas as pd
 
-
-def _parse_date(value: str) -> datetime:
-    dt = datetime.fromisoformat(value)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+from backtest.download import download_klines
+from backtest.runner import run_backtest, summarize
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Trade Vision historical backtest for BTCUSDT")
-    parser.add_argument("--start", default="2026-06-01T00:00:00+00:00")
-    parser.add_argument("--end", default="2026-09-01T00:00:00+00:00")
+    parser = argparse.ArgumentParser(
+        description="Download BTCUSDT history from BingX and run Trade Vision backtest"
+    )
     parser.add_argument("--symbol", default="BTCUSDT")
+    parser.add_argument("--start", default="2026-01-01")
+    parser.add_argument("--end", default="2026-09-01")
+    parser.add_argument("--warmup", type=int, default=6400)
+    parser.add_argument("--out", default="backtest_btc_results.csv")
     args = parser.parse_args()
 
-    start = _parse_date(args.start)
-    end = _parse_date(args.end)
+    symbol = args.symbol.upper()
 
-    print(f"[BACKTEST] downloading {args.symbol} 4H...")
-    df4h = download_klines_range(args.symbol, "240", start, end)
-    print(f"[BACKTEST] downloading {args.symbol} 15M...")
-    df15 = download_klines_range(args.symbol, "15", start, end)
-
-    if df4h is None or df4h.empty:
-        raise SystemExit("No 4H data")
-    if df15 is None or df15.empty:
-        raise SystemExit("No 15M data")
-
-    print(f"[BACKTEST] 4H candles: {len(df4h)}")
-    print(f"[BACKTEST] 15M candles: {len(df15)}")
-
-    result = run_backtest(
-        symbol=args.symbol,
-        df4h=df4h,
-        df15=df15,
+    print(f"[BACKTEST] Downloading {symbol} 15M history: {args.start} -> {args.end}")
+    df15 = download_klines(
+        symbol=symbol,
+        interval="15",
+        start=args.start,
+        end=args.end,
     )
 
+    if df15.empty:
+        raise SystemExit("No 15M data received from BingX")
+
+    print(f"[BACKTEST] 15M candles: {len(df15)}")
+    print("[BACKTEST] Replaying live Trade Vision logic candle-by-candle...")
+
+    trades = run_backtest(
+        symbol=symbol,
+        df15=df15,
+        warmup_15m=args.warmup,
+    )
+
+    summary = summarize(trades)
+
+    out = Path(args.out)
+    pd.DataFrame([asdict(t) for t in trades]).to_csv(out, index=False)
+
     print("\n========== TRADE VISION BTC BACKTEST ==========")
-    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    for key, value in summary.items():
+        print(f"{key}: {value}")
+    print(f"results: {out.resolve()}")
 
 
 if __name__ == "__main__":
