@@ -1,0 +1,41 @@
+name: FVG Depth Cross-Asset Backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "backtest/fvg_depth_cross_asset_test.py"
+      - ".github/workflows/fvg_depth_backtest.yml"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FVG Depth Cross-Asset Backtest
+        run: python -m backtest.fvg_depth_cross_asset_test
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fvg-depth-cross-asset-results
+          path: |
+            backtest/data/cross_asset_fvg_depth_summary.csv
+            backtest/data/cross_asset_fvg_depth_detail.csv
+            backtest/data/btc_fvg_depth_detail.csv
+            backtest/data/eth_fvg_depth_detail.csv
+            backtest/data/zec_fvg_depth_detail.csv
