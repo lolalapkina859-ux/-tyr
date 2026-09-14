@@ -1,0 +1,35 @@
+name: FVG Cross-Asset Backtest
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FVG Cross-Asset Backtest
+        run: python -m backtest.fvg_cross_asset_test
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fvg-cross-asset-results
+          path: |
+            backtest/data/cross_asset_fvg_quality_summary.csv
+            backtest/data/cross_asset_fvg_quality_metadata.csv
+            backtest/data/btc_fvg_quality_metadata.csv
+            backtest/data/eth_fvg_quality_metadata.csv
+            backtest/data/zec_fvg_quality_metadata.csv
