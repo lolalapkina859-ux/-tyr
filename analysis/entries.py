@@ -649,7 +649,7 @@ def build_retrace_entry(
     Priority:
 
     1. Valid FVG + BOS-linked refined Order Block overlap
-    2. Valid LuxAlgo-style FVG 50%
+    2. Valid LuxAlgo-style FVG 75%
     3. Valid BOS-linked refined Order Block 50%
 
     Keeps the same return interface used by engine.py.
@@ -733,22 +733,27 @@ def build_retrace_entry(
         }
 
     # -------------------------------------------------
-    # FVG 50%
+    # FVG 75%
     # -------------------------------------------------
 
     if fvg:
+        fvg_low = float(fvg["low"])
+        fvg_high = float(fvg["high"])
+        fvg_width = fvg_high - fvg_low
+
+        if side == "LONG":
+            # 0% = proximal/top edge, 100% = distal/bottom edge.
+            fvg_entry = fvg_high - fvg_width * 0.75
+        else:
+            # 0% = proximal/bottom edge, 100% = distal/top edge.
+            fvg_entry = fvg_low + fvg_width * 0.75
+
         return {
             "side": side,
-            "entry_type": "FVG 50%",
-            "zone_low": float(
-                fvg["low"]
-            ),
-            "zone_high": float(
-                fvg["high"]
-            ),
-            "entry": float(
-                fvg["mid"]
-            ),
+            "entry_type": "FVG 75%",
+            "zone_low": fvg_low,
+            "zone_high": fvg_high,
+            "entry": float(fvg_entry),
             "current_price": current_price,
             "fvg": fvg,
             "order_block": ob,
