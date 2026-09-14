@@ -5,6 +5,7 @@ from config import (
     WATCHED_SYMBOLS,
     SCAN_INTERVAL_SECONDS,
     MIN_SIGNAL_SCORE,
+    SHORT_MIN_SIGNAL_SCORE,
 )
 
 from exchange.bybit import get_klines, get_top_symbols
