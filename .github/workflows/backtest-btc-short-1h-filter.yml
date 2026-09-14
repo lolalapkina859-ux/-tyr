@@ -1,4 +1,4 @@
-name: BTC TP1 RR Sweep Fast
+name: BTC SHORT Stop Sweep Fast
 
 on:
   workflow_dispatch:
@@ -6,16 +6,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pandas
-      - name: Run TP1 RR sweep
-        run: python -m backtest.sweep_btc_tp1_rr --out backtest_btc_tp1_rr_sweep.csv
+      - run: pip install -r requirements.txt
+      - name: Replay SHORT stop widths
+        run: |
+          python -m backtest.short_stop_sweep \
+            --symbol BTCUSDT \
+            --baseline backtest/data/backtest_btc_ob_filtered_1_10.csv \
+            --start "2026-03-01T00:00:00+00:00" \
+            --end "2026-09-01T00:00:00+00:00" \
+            --out backtest_btc_short_stop_sweep.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: btc-tp1-rr-sweep-fast
-          path: backtest_btc_tp1_rr_sweep.csv
+          name: btc-short-stop-sweep-fast
+          path: backtest_btc_short_stop_sweep.csv
