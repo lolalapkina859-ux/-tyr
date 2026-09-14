@@ -1,0 +1,35 @@
+name: BTC LIMIT vs MARKET Fast
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fast comparison
+        run: |
+          python -m backtest.run_btc_market_fast \
+            --baseline backtest/data/backtest_btc_ob_filtered_1_10.csv \
+            --start "2026-03-01T00:00:00+00:00" \
+            --end "2026-09-01T00:00:00+00:00" \
+            --out backtest_btc_market_fast.csv
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-limit-vs-market-fast
+          path: backtest_btc_market_fast.csv
