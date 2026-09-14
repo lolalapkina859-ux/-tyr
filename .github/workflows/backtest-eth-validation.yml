@@ -1,0 +1,50 @@
+name: ETH Cross-Asset Validation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      MIN_SIGNAL_SCORE: "70"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: ETH baseline plus OB 1.10
+        run: |
+          python -m backtest.run_btc_ob \
+            --symbol ETHUSDT \
+            --start "2026-03-01T00:00:00+00:00" \
+            --end "2026-09-01T00:00:00+00:00" \
+            --min-ob-volume-ratio 1.10 \
+            --min-ob-balance 0.0 \
+            --out backtest_eth_ob_quality.csv \
+            --filtered-out backtest_eth_ob_filtered_1_10.csv
+
+      - name: Apply SHORT-only closed 1H filter
+        run: |
+          python -m backtest.filter_symbol_short_by_1h \
+            --symbol ETHUSDT \
+            --baseline backtest_eth_ob_filtered_1_10.csv \
+            --start "2026-03-01T00:00:00+00:00" \
+            --end "2026-09-01T00:00:00+00:00" \
+            --out backtest_eth_short_1h_filter.csv
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eth-cross-asset-validation
+          path: |
+            backtest_eth_ob_quality.csv
+            backtest_eth_ob_filtered_1_10.csv
+            backtest_eth_short_1h_filter.csv
+          if-no-files-found: warn
