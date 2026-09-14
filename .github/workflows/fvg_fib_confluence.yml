@@ -1,0 +1,33 @@
+name: FVG75 Fib Confluence Backtest
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'backtest/fvg_fib_confluence_test.py'
+      - '.github/workflows/fvg_fib_confluence.yml'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Generate FVG depth detail
+        run: python -m backtest.fvg_depth_cross_asset_test
+      - name: Test FVG75 Fib confluence
+        run: python -m backtest.fvg_fib_confluence_test
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fvg75-fib-confluence-results
+          path: |
+            backtest/data/fvg75_fib_confluence_summary.csv
+            backtest/data/fvg75_fib_confluence_detail.csv
