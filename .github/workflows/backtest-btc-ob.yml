@@ -1,0 +1,58 @@
+name: BTC OB Quality Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "UTC start date"
+        required: false
+        default: "2026-03-01T00:00:00+00:00"
+      end:
+        description: "UTC end date"
+        required: false
+        default: "2026-09-01T00:00:00+00:00"
+      min_ob_volume_ratio:
+        description: "Minimum 3-candle BOS volume ratio vs prior median"
+        required: false
+        default: "1.20"
+      min_ob_balance:
+        description: "Minimum SMC-style OB balance percentage"
+        required: false
+        default: "0.0"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      MIN_SIGNAL_SCORE: "70"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run BTC OB quality backtest
+        run: |
+          python -m backtest.run_btc_ob \
+            --start "${{ github.event.inputs.start }}" \
+            --end "${{ github.event.inputs.end }}" \
+            --min-ob-volume-ratio "${{ github.event.inputs.min_ob_volume_ratio }}" \
+            --min-ob-balance "${{ github.event.inputs.min_ob_balance }}"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-ob-quality-results
+          path: |
+            backtest_btc_ob_quality.csv
+            backtest_btc_ob_filtered.csv
+          if-no-files-found: ignore
