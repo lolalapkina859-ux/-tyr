@@ -1,0 +1,291 @@
+//@version=6
+indicator("Trade Vision 24/7 — Core V1", "TV24 Core V1", overlay=true, max_labels_count=100, max_lines_count=100, max_boxes_count=30)
+
+// =========================================================
+// TRADE VISION 24/7 — TRADINGVIEW CORE V1
+// 4H liquidity sweep/reclaim -> 15M BOS -> FVG/OB -> LIMIT
+// Uses confirmed candles for signal generation.
+// Designed primarily for a 15 minute chart.
+// =========================================================
+
+// ------------------------- INPUTS -------------------------
+grpCore = "Core"
+structureLen = input.int(12, "15M structure length", minval=5, maxval=50, group=grpCore)
+obSearch      = input.int(8, "OB origin search", minval=3, maxval=20, group=grpCore)
+fvgMaxAge    = input.int(12, "Max FVG age (bars)", minval=2, maxval=40, group=grpCore)
+atrLen        = input.int(55, "ATR length", minval=5, maxval=200, group=grpCore)
+slAtrBuffer   = input.float(0.35, "SL ATR buffer", minval=0.05, step=0.05, group=grpCore)
+minRiskAtr    = input.float(0.65, "Minimum risk ATR", minval=0.10, step=0.05, group=grpCore)
+
+showWatch  = input.bool(true, "Show WATCH", group="Visual")
+showLevels = input.bool(false, "Show HTF liquidity levels", group="Visual")
+showZones  = input.bool(true, "Show active entry zone", group="Visual")
+
+// ------------------------- HELPERS -------------------------
+f_mid(float a, float b) => (a + b) / 2.0
+
+f_rr_target(string side, float entry, float risk, float rr) =>
+    side == "LONG" ? entry + risk * rr : entry - risk * rr
+
+// ------------------------- HTF LIQUIDITY -------------------------
+// Previous completed daily / weekly / monthly ranges.
+pdh = request.security(syminfo.tickerid, "D", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pwh = request.security(syminfo.tickerid, "W", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pwl = request.security(syminfo.tickerid, "W", low[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pmh = request.security(syminfo.tickerid, "M", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pml = request.security(syminfo.tickerid, "M", low[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Previous completed 4H candle. This is the HTF reaction candle.
+h4High  = request.security(syminfo.tickerid, "240", high[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+h4Low   = request.security(syminfo.tickerid, "240", low[1],   gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+h4Close = request.security(syminfo.tickerid, "240", close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Sweep = wick through liquidity + close back through the level.
+longPML = h4Low < pml and h4Close > pml
+longPWL = h4Low < pwl and h4Close > pwl
+longPDL = h4Low < pdl and h4Close > pdl
+
+shortPMH = h4High > pmh and h4Close < pmh
+shortPWH = h4High > pwh and h4Close < pwh
+shortPDH = h4High > pdh and h4Close < pdh
+
+htfLongSweep  = longPML or longPWL or longPDL
+htfShortSweep = shortPMH or shortPWH or shortPDH
+
+longLevelName = longPML ? "PML" : longPWL ? "PWL" : longPDL ? "PDL" : ""
+shortLevelName = shortPMH ? "PMH" : shortPWH ? "PWH" : shortPDH ? "PDH" : ""
+
+longReclaim = longPML ? pml : longPWL ? pwl : longPDL ? pdl : na
+shortReclaim = shortPMH ? pmh : shortPWH ? pwh : shortPDH ? pdh : na
+
+// ------------------------- 15M STRUCTURE -------------------------
+prevStructureHigh = ta.highest(high[1], structureLen)
+prevStructureLow  = ta.lowest(low[1], structureLen)
+
+bullBOS = barstate.isconfirmed and close > prevStructureHigh
+bearBOS = barstate.isconfirmed and close < prevStructureLow
+
+// ------------------------- FVG -------------------------
+atr = ta.atr(atrLen)
+bodyDelta = math.abs(close[1] - open[1])
+bodyStrong = bodyDelta >= atr[1] * 0.35
+
+bullFvgNew = barstate.isconfirmed and low > high[2] and close[1] > high[2] and bodyStrong
+bearFvgNew = barstate.isconfirmed and high < low[2] and close[1] < low[2] and bodyStrong
+
+var float bullFvgLow = na
+var float bullFvgHigh = na
+var int bullFvgBar = na
+var float bearFvgLow = na
+var float bearFvgHigh = na
+var int bearFvgBar = na
+
+if bullFvgNew
+    bullFvgLow := high[2]
+    bullFvgHigh := low
+    bullFvgBar := bar_index
+
+if bearFvgNew
+    bearFvgLow := high
+    bearFvgHigh := low[2]
+    bearFvgBar := bar_index
+
+// Invalidate consumed/broken FVGs.
+if not na(bullFvgLow) and low < bullFvgLow
+    bullFvgLow := na
+    bullFvgHigh := na
+    bullFvgBar := na
+
+if not na(bearFvgHigh) and high > bearFvgHigh
+    bearFvgLow := na
+    bearFvgHigh := na
+    bearFvgBar := na
+
+bullFvgValid = not na(bullFvgBar) and bar_index - bullFvgBar <= fvgMaxAge
+bearFvgValid = not na(bearFvgBar) and bar_index - bearFvgBar <= fvgMaxAge
+
+// ------------------------- BOS-LINKED ORDER BLOCK -------------------------
+// Last opposite candle before the structural break.
+float bullObLow = na
+float bullObHigh = na
+float bearObLow = na
+float bearObHigh = na
+
+if bullBOS
+    for i = 1 to obSearch
+        if na(bullObLow) and close[i] < open[i]
+            bullObLow := low[i]
+            bullObHigh := high[i]
+
+if bearBOS
+    for i = 1 to obSearch
+        if na(bearObLow) and close[i] > open[i]
+            bearObLow := low[i]
+            bearObHigh := high[i]
+
+// ------------------------- ENTRY BUILD -------------------------
+// Priority mirrors the Python concept:
+// 1) FVG + OB overlap, 2) FVG 50%, 3) OB 50%.
+float longZoneLow = na
+float longZoneHigh = na
+float longEntry = na
+string longEntryType = ""
+
+if bullBOS
+    overlapLowL = bullFvgValid and not na(bullObLow) ? math.max(bullFvgLow, bullObLow) : na
+    overlapHighL = bullFvgValid and not na(bullObHigh) ? math.min(bullFvgHigh, bullObHigh) : na
+    hasOverlapL = not na(overlapLowL) and not na(overlapHighL) and overlapHighL > overlapLowL
+    if hasOverlapL
+        longZoneLow := overlapLowL
+        longZoneHigh := overlapHighL
+        longEntry := f_mid(overlapLowL, overlapHighL)
+        longEntryType := "FVG + OB"
+    else if bullFvgValid
+        longZoneLow := bullFvgLow
+        longZoneHigh := bullFvgHigh
+        longEntry := f_mid(bullFvgLow, bullFvgHigh)
+        longEntryType := "FVG 50%"
+    else if not na(bullObLow)
+        longZoneLow := bullObLow
+        longZoneHigh := bullObHigh
+        longEntry := f_mid(bullObLow, bullObHigh)
+        longEntryType := "OB 50%"
+
+float shortZoneLow = na
+float shortZoneHigh = na
+float shortEntry = na
+string shortEntryType = ""
+
+if bearBOS
+    overlapLowS = bearFvgValid and not na(bearObLow) ? math.max(bearFvgLow, bearObLow) : na
+    overlapHighS = bearFvgValid and not na(bearObHigh) ? math.min(bearFvgHigh, bearObHigh) : na
+    hasOverlapS = not na(overlapLowS) and not na(overlapHighS) and overlapHighS > overlapLowS
+    if hasOverlapS
+        shortZoneLow := overlapLowS
+        shortZoneHigh := overlapHighS
+        shortEntry := f_mid(overlapLowS, overlapHighS)
+        shortEntryType := "FVG + OB"
+    else if bearFvgValid
+        shortZoneLow := bearFvgLow
+        shortZoneHigh := bearFvgHigh
+        shortEntry := f_mid(bearFvgLow, bearFvgHigh)
+        shortEntryType := "FVG 50%"
+    else if not na(bearObLow)
+        shortZoneLow := bearObLow
+        shortZoneHigh := bearObHigh
+        shortEntry := f_mid(bearObLow, bearObHigh)
+        shortEntryType := "OB 50%"
+
+longSignal = htfLongSweep and bullBOS and not na(longEntry)
+shortSignal = htfShortSweep and bearBOS and not na(shortEntry)
+
+// ------------------------- SMART STRUCTURAL SL V1 -------------------------
+recentLow = ta.lowest(low[1], 16)
+recentHigh = ta.highest(high[1], 16)
+
+float longSL = na
+float shortSL = na
+float longRisk = na
+float shortRisk = na
+
+if longSignal
+    anchorL = math.min(longZoneLow, math.min(longReclaim, recentLow))
+    rawSL = anchorL - atr * slAtrBuffer
+    minimumRisk = atr * minRiskAtr
+    longSL := math.min(rawSL, longEntry - minimumRisk)
+    longRisk := longEntry - longSL
+
+if shortSignal
+    anchorS = math.max(shortZoneHigh, math.max(shortReclaim, recentHigh))
+    rawSL = anchorS + atr * slAtrBuffer
+    minimumRisk = atr * minRiskAtr
+    shortSL := math.max(rawSL, shortEntry + minimumRisk)
+    shortRisk := shortSL - shortEntry
+
+// V1 targets use structural R slots. Hybrid liquidity/FVG/VP targets come later.
+longTP1 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 0.70) : na
+longTP2 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 1.30) : na
+longTP3 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 2.00) : na
+longTP4 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 3.00) : na
+
+shortTP1 = shortSignal ? f_rr_target("SHORT", shortEntry, shortRisk, 0.70) : na
+shortTP2 = shortSignal ? f_rr_target("SHORT", shortEntry, shortRisk, 1.30) : na
+shortTP3 = shortSignal ? f_rr_target("SHORT", shortEntry, shortRisk, 2.00) : na
+shortTP4 = shortSignal ? f_rr_target("SHORT", shortEntry, shortRisk, 3.00) : na
+
+// ------------------------- VISUAL STATE -------------------------
+watchLong = showWatch and htfLongSweep and not bullBOS
+watchShort = showWatch and htfShortSweep and not bearBOS
+
+plotshape(watchLong and not watchLong[1], title="WATCH LONG", style=shape.labelup, location=location.belowbar, text="WATCH\nLONG", size=size.tiny)
+plotshape(watchShort and not watchShort[1], title="WATCH SHORT", style=shape.labeldown, location=location.abovebar, text="WATCH\nSHORT", size=size.tiny)
+
+plotshape(longSignal, title="LONG", style=shape.labelup, location=location.belowbar, text="LONG", size=size.small)
+plotshape(shortSignal, title="SHORT", style=shape.labeldown, location=location.abovebar, text="SHORT", size=size.small)
+
+// Keep only the latest trade plan on chart.
+var line entryLine = na
+var line slLine = na
+var line tp1Line = na
+var line tp2Line = na
+var line tp3Line = na
+var line tp4Line = na
+var box zoneBox = na
+var label infoLabel = na
+
+f_clear_plan() =>
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tp1Line)
+        line.delete(tp1Line)
+    if not na(tp2Line)
+        line.delete(tp2Line)
+    if not na(tp3Line)
+        line.delete(tp3Line)
+    if not na(tp4Line)
+        line.delete(tp4Line)
+    if not na(zoneBox)
+        box.delete(zoneBox)
+    if not na(infoLabel)
+        label.delete(infoLabel)
+
+if longSignal
+    f_clear_plan()
+    entryLine := line.new(bar_index, longEntry, bar_index + 40, longEntry, extend=extend.none, style=line.style_dashed, width=2)
+    slLine := line.new(bar_index, longSL, bar_index + 40, longSL, extend=extend.none, width=2)
+    tp1Line := line.new(bar_index, longTP1, bar_index + 40, longTP1)
+    tp2Line := line.new(bar_index, longTP2, bar_index + 40, longTP2)
+    tp3Line := line.new(bar_index, longTP3, bar_index + 40, longTP3)
+    tp4Line := line.new(bar_index, longTP4, bar_index + 40, longTP4)
+    if showZones
+        zoneBox := box.new(bar_index, longZoneHigh, bar_index + 40, longZoneLow, bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 55))
+    infoLabel := label.new(bar_index, low, "LONG 🟢\n" + longLevelName + " sweep → 15M BOS\n" + longEntryType + "\nLIMIT " + str.tostring(longEntry, format.mintick) + "\nSL " + str.tostring(longSL, format.mintick), style=label.style_label_up, textcolor=color.white, color=color.new(color.green, 15))
+
+if shortSignal
+    f_clear_plan()
+    entryLine := line.new(bar_index, shortEntry, bar_index + 40, shortEntry, extend=extend.none, style=line.style_dashed, width=2)
+    slLine := line.new(bar_index, shortSL, bar_index + 40, shortSL, extend=extend.none, width=2)
+    tp1Line := line.new(bar_index, shortTP1, bar_index + 40, shortTP1)
+    tp2Line := line.new(bar_index, shortTP2, bar_index + 40, shortTP2)
+    tp3Line := line.new(bar_index, shortTP3, bar_index + 40, shortTP3)
+    tp4Line := line.new(bar_index, shortTP4, bar_index + 40, shortTP4)
+    if showZones
+        zoneBox := box.new(bar_index, shortZoneHigh, bar_index + 40, shortZoneLow, bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 55))
+    infoLabel := label.new(bar_index, high, "SHORT 🔴\n" + shortLevelName + " sweep → 15M BOS\n" + shortEntryType + "\nLIMIT " + str.tostring(shortEntry, format.mintick) + "\nSL " + str.tostring(shortSL, format.mintick), style=label.style_label_down, textcolor=color.white, color=color.new(color.red, 15))
+
+// Optional liquidity display.
+plot(showLevels ? pdh : na, "PDH", color=color.new(color.red, 65), style=plot.style_linebr)
+plot(showLevels ? pdl : na, "PDL", color=color.new(color.green, 65), style=plot.style_linebr)
+plot(showLevels ? pwh : na, "PWH", color=color.new(color.red, 45), style=plot.style_linebr)
+plot(showLevels ? pwl : na, "PWL", color=color.new(color.green, 45), style=plot.style_linebr)
+plot(showLevels ? pmh : na, "PMH", color=color.new(color.red, 25), style=plot.style_linebr)
+plot(showLevels ? pml : na, "PML", color=color.new(color.green, 25), style=plot.style_linebr)
+
+// ------------------------- ALERTS -------------------------
+alertcondition(watchLong and not watchLong[1], "Trade Vision WATCH LONG", "Trade Vision: HTF liquidity sweep/reclaim. Waiting for 15M bullish BOS.")
+alertcondition(watchShort and not watchShort[1], "Trade Vision WATCH SHORT", "Trade Vision: HTF liquidity sweep/reclaim. Waiting for 15M bearish BOS.")
+alertcondition(longSignal, "Trade Vision LONG", "Trade Vision LONG confirmed: HTF sweep + 15M BOS + retrace zone.")
+alertcondition(shortSignal, "Trade Vision SHORT", "Trade Vision SHORT confirmed: HTF sweep + 15M BOS + retrace zone.")
