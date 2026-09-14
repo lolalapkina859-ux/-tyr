@@ -1,0 +1,40 @@
+name: Structure Strength SHORT Filter Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backtest/structure_strength_short_filter_test.py"
+      - ".github/workflows/structure_strength_short_filter.yml"
+      - "backtest/data/backtest_btc_ob_filtered_1_10.csv"
+      - "backtest/data/backtest_eth_ob_filtered_1_10.csv"
+      - "backtest/data/backtest_zec_ob_filtered_1_10.csv"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run structure strength SHORT filter test
+        run: python -m backtest.structure_strength_short_filter_test
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: structure-strength-short-filter-results
+          path: |
+            backtest/data/structure_strength_short_filter_summary.csv
+            backtest/data/structure_strength_short_filter_detail.csv
