@@ -20,6 +20,11 @@ jobs:
   backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        ratio: ["1.00", "1.10", "1.20", "1.30", "1.40", "1.50"]
+
     env:
       MIN_SIGNAL_SCORE: "70"
 
@@ -35,27 +40,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run OB threshold sweep
-        shell: bash
+      - name: Run BTC OB quality backtest
         run: |
-          set -e
-          mkdir -p ob_threshold_sweep
-          for ratio in 1.00 1.10 1.20 1.30 1.40 1.50; do
-            echo "===== OB VOLUME RATIO ${ratio} ====="
-            python -m backtest.run_btc_ob \
-              --start "${{ github.event.inputs.start }}" \
-              --end "${{ github.event.inputs.end }}" \
-              --min-ob-volume-ratio "${ratio}" \
-              --min-ob-balance "${{ github.event.inputs.min_ob_balance }}"
-            tag=$(echo "$ratio" | tr '.' '_')
-            mv backtest_btc_ob_quality.csv "ob_threshold_sweep/backtest_btc_ob_quality_${tag}.csv"
-            mv backtest_btc_ob_filtered.csv "ob_threshold_sweep/backtest_btc_ob_filtered_${tag}.csv"
-          done
+          python -m backtest.run_btc_ob \
+            --start "${{ github.event.inputs.start }}" \
+            --end "${{ github.event.inputs.end }}" \
+            --min-ob-volume-ratio "${{ matrix.ratio }}" \
+            --min-ob-balance "${{ github.event.inputs.min_ob_balance }}"
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: btc-ob-threshold-sweep-results
-          path: ob_threshold_sweep/*.csv
+          name: btc-ob-ratio-${{ matrix.ratio }}
+          path: |
+            backtest_btc_ob_quality.csv
+            backtest_btc_ob_filtered.csv
           if-no-files-found: ignore
