@@ -1,0 +1,36 @@
+name: Pending Invalidation Backtest
+
+on:
+  push:
+    paths:
+      - "backtest/pending_invalidation_test.py"
+      - ".github/workflows/pending_invalidation_backtest.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pending invalidation cross-asset test
+        run: python -m backtest.pending_invalidation_test
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pending-invalidation-results
+          path: |
+            backtest/data/pending_invalidation_summary.csv
+            backtest/data/pending_invalidation_detail.csv
