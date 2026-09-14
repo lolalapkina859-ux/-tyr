@@ -1,4 +1,4 @@
-name: BTC TP1 RR Fast
+name: BTC TP1 RR Sweep Fast
 
 on:
   workflow_dispatch:
@@ -7,28 +7,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install pandas
-        run: pip install pandas
-
-      - name: Run TP1 minimum 1R filter
-        run: |
-          python -m backtest.filter_btc_tp1_rr \
-            --baseline backtest/data/backtest_btc_ob_filtered_1_10.csv \
-            --min-tp1-r 1.0 \
-            --out backtest_btc_tp1_rr.csv
-
-      - name: Upload result
-        uses: actions/upload-artifact@v4
+      - run: pip install pandas
+      - name: Run TP1 RR sweep
+        run: python -m backtest.sweep_btc_tp1_rr --out backtest_btc_tp1_rr_sweep.csv
+      - uses: actions/upload-artifact@v4
         with:
-          name: btc-tp1-rr-fast
-          path: backtest_btc_tp1_rr.csv
+          name: btc-tp1-rr-sweep-fast
+          path: backtest_btc_tp1_rr_sweep.csv
