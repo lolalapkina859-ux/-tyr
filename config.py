@@ -15,6 +15,7 @@ WATCHED_SYMBOLS = [
 
 SCAN_INTERVAL_SECONDS = 60
 MIN_SIGNAL_SCORE = int(os.getenv("MIN_SIGNAL_SCORE", "70"))
+SHORT_MIN_SIGNAL_SCORE = int(os.getenv("SHORT_MIN_SIGNAL_SCORE", "88"))
 
 # Liquidity Tracker defaults from the Pine script
 WT_CHANNEL = 9
