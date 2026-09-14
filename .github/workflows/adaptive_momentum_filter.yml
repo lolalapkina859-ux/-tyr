@@ -1,0 +1,35 @@
+name: Adaptive Momentum Filter Backtest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backtest/adaptive_momentum_filter_test.py"
+      - ".github/workflows/adaptive_momentum_filter.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run adaptive momentum filter backtest
+        run: python -m backtest.adaptive_momentum_filter_test
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-momentum-filter-results
+          path: |
+            backtest/data/adaptive_momentum_filter_summary.csv
+            backtest/data/adaptive_momentum_filter_detail.csv
