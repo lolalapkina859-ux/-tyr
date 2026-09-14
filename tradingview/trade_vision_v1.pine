@@ -1,5 +1,5 @@
 //@version=6
-indicator("Trade Vision 24/7 — Core V1", "TV24 Core V1", overlay=true, max_labels_count=100, max_lines_count=100, max_boxes_count=30)
+indicator("Trade Vision 24/7 — Core V1", "TV24 Core V1", overlay=true, max_labels_count=200, max_lines_count=100, max_boxes_count=30)
 
 // =========================================================
 // TRADE VISION 24/7 — TRADINGVIEW CORE V1
@@ -20,6 +20,8 @@ minRiskAtr    = input.float(0.65, "Minimum risk ATR", minval=0.10, step=0.05, gr
 showWatch  = input.bool(true, "Show WATCH", group="Visual")
 showLevels = input.bool(false, "Show HTF liquidity levels", group="Visual")
 showZones  = input.bool(true, "Show active entry zone", group="Visual")
+showPriceLabels = input.bool(true, "Show ENTRY / SL / TP labels", group="Visual")
+planBars = input.int(40, "Plan line length", minval=10, maxval=150, group="Visual")
 
 // ------------------------- HELPERS -------------------------
 f_mid(float a, float b) => (a + b) / 2.0
@@ -28,7 +30,6 @@ f_rr_target(string side, float entry, float risk, float rr) =>
     side == "LONG" ? entry + risk * rr : entry - risk * rr
 
 // ------------------------- HTF LIQUIDITY -------------------------
-// Previous completed daily / weekly / monthly ranges.
 pdh = request.security(syminfo.tickerid, "D", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 pdl = request.security(syminfo.tickerid, "D", low[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 pwh = request.security(syminfo.tickerid, "W", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -36,12 +37,10 @@ pwl = request.security(syminfo.tickerid, "W", low[1],  gaps=barmerge.gaps_off, l
 pmh = request.security(syminfo.tickerid, "M", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 pml = request.security(syminfo.tickerid, "M", low[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-// Previous completed 4H candle. This is the HTF reaction candle.
 h4High  = request.security(syminfo.tickerid, "240", high[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 h4Low   = request.security(syminfo.tickerid, "240", low[1],   gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 h4Close = request.security(syminfo.tickerid, "240", close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-// Sweep = wick through liquidity + close back through the level.
 longPML = h4Low < pml and h4Close > pml
 longPWL = h4Low < pwl and h4Close > pwl
 longPDL = h4Low < pdl and h4Close > pdl
@@ -91,7 +90,6 @@ if bearFvgNew
     bearFvgHigh := low[2]
     bearFvgBar := bar_index
 
-// Invalidate consumed/broken FVGs.
 if not na(bullFvgLow) and low < bullFvgLow
     bullFvgLow := na
     bullFvgHigh := na
@@ -106,7 +104,6 @@ bullFvgValid = not na(bullFvgBar) and bar_index - bullFvgBar <= fvgMaxAge
 bearFvgValid = not na(bearFvgBar) and bar_index - bearFvgBar <= fvgMaxAge
 
 // ------------------------- BOS-LINKED ORDER BLOCK -------------------------
-// Last opposite candle before the structural break.
 float bullObLow = na
 float bullObHigh = na
 float bearObLow = na
@@ -125,8 +122,6 @@ if bearBOS
             bearObHigh := high[i]
 
 // ------------------------- ENTRY BUILD -------------------------
-// Priority mirrors the Python concept:
-// 1) FVG + OB overlap, 2) FVG 50%, 3) OB 50%.
 float longZoneLow = na
 float longZoneHigh = na
 float longEntry = na
@@ -203,7 +198,6 @@ if shortSignal
     shortSL := math.max(rawSL, shortEntry + minimumRisk)
     shortRisk := shortSL - shortEntry
 
-// V1 targets use structural R slots. Hybrid liquidity/FVG/VP targets come later.
 longTP1 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 0.70) : na
 longTP2 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 1.30) : na
 longTP3 = longSignal ? f_rr_target("LONG", longEntry, longRisk, 2.00) : na
@@ -218,13 +212,12 @@ shortTP4 = shortSignal ? f_rr_target("SHORT", shortEntry, shortRisk, 3.00) : na
 watchLong = showWatch and htfLongSweep and not bullBOS
 watchShort = showWatch and htfShortSweep and not bearBOS
 
-plotshape(watchLong and not watchLong[1], title="WATCH LONG", style=shape.labelup, location=location.belowbar, text="WATCH\nLONG", size=size.tiny)
-plotshape(watchShort and not watchShort[1], title="WATCH SHORT", style=shape.labeldown, location=location.abovebar, text="WATCH\nSHORT", size=size.tiny)
+plotshape(watchLong and not watchLong[1], title="WATCH LONG", style=shape.labelup, location=location.belowbar, text="WATCH\nLONG", size=size.tiny, force_overlay=true)
+plotshape(watchShort and not watchShort[1], title="WATCH SHORT", style=shape.labeldown, location=location.abovebar, text="WATCH\nSHORT", size=size.tiny, force_overlay=true)
+plotshape(longSignal, title="LONG", style=shape.labelup, location=location.belowbar, text="LONG", size=size.small, force_overlay=true)
+plotshape(shortSignal, title="SHORT", style=shape.labeldown, location=location.abovebar, text="SHORT", size=size.small, force_overlay=true)
 
-plotshape(longSignal, title="LONG", style=shape.labelup, location=location.belowbar, text="LONG", size=size.small)
-plotshape(shortSignal, title="SHORT", style=shape.labeldown, location=location.abovebar, text="SHORT", size=size.small)
-
-// Keep only the latest trade plan on chart.
+// Keep only the latest trade plan on the MAIN PRICE CHART.
 var line entryLine = na
 var line slLine = na
 var line tp1Line = na
@@ -233,6 +226,12 @@ var line tp3Line = na
 var line tp4Line = na
 var box zoneBox = na
 var label infoLabel = na
+var label entryPriceLabel = na
+var label slPriceLabel = na
+var label tp1PriceLabel = na
+var label tp2PriceLabel = na
+var label tp3PriceLabel = na
+var label tp4PriceLabel = na
 
 f_clear_plan() =>
     if not na(entryLine)
@@ -251,38 +250,66 @@ f_clear_plan() =>
         box.delete(zoneBox)
     if not na(infoLabel)
         label.delete(infoLabel)
+    if not na(entryPriceLabel)
+        label.delete(entryPriceLabel)
+    if not na(slPriceLabel)
+        label.delete(slPriceLabel)
+    if not na(tp1PriceLabel)
+        label.delete(tp1PriceLabel)
+    if not na(tp2PriceLabel)
+        label.delete(tp2PriceLabel)
+    if not na(tp3PriceLabel)
+        label.delete(tp3PriceLabel)
+    if not na(tp4PriceLabel)
+        label.delete(tp4PriceLabel)
 
 if longSignal
     f_clear_plan()
-    entryLine := line.new(bar_index, longEntry, bar_index + 40, longEntry, extend=extend.none, style=line.style_dashed, width=2)
-    slLine := line.new(bar_index, longSL, bar_index + 40, longSL, extend=extend.none, width=2)
-    tp1Line := line.new(bar_index, longTP1, bar_index + 40, longTP1)
-    tp2Line := line.new(bar_index, longTP2, bar_index + 40, longTP2)
-    tp3Line := line.new(bar_index, longTP3, bar_index + 40, longTP3)
-    tp4Line := line.new(bar_index, longTP4, bar_index + 40, longTP4)
+    endBar = bar_index + planBars
+    entryLine := line.new(bar_index, longEntry, endBar, longEntry, extend=extend.none, color=color.yellow, style=line.style_dashed, width=3, force_overlay=true)
+    slLine := line.new(bar_index, longSL, endBar, longSL, extend=extend.none, color=color.red, width=2, force_overlay=true)
+    tp1Line := line.new(bar_index, longTP1, endBar, longTP1, color=color.lime, width=1, force_overlay=true)
+    tp2Line := line.new(bar_index, longTP2, endBar, longTP2, color=color.lime, width=1, force_overlay=true)
+    tp3Line := line.new(bar_index, longTP3, endBar, longTP3, color=color.lime, width=1, force_overlay=true)
+    tp4Line := line.new(bar_index, longTP4, endBar, longTP4, color=color.lime, width=1, force_overlay=true)
     if showZones
-        zoneBox := box.new(bar_index, longZoneHigh, bar_index + 40, longZoneLow, bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 55))
-    infoLabel := label.new(bar_index, low, "LONG 🟢\n" + longLevelName + " sweep → 15M BOS\n" + longEntryType + "\nLIMIT " + str.tostring(longEntry, format.mintick) + "\nSL " + str.tostring(longSL, format.mintick), style=label.style_label_up, textcolor=color.white, color=color.new(color.green, 15))
+        zoneBox := box.new(bar_index, longZoneHigh, endBar, longZoneLow, bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 55), force_overlay=true)
+    infoLabel := label.new(bar_index, low, "LONG 🟢\n" + longLevelName + " sweep → 15M BOS\n" + longEntryType, style=label.style_label_up, textcolor=color.white, color=color.new(color.green, 15), force_overlay=true)
+    if showPriceLabels
+        entryPriceLabel := label.new(endBar, longEntry, "ENTRY  " + str.tostring(longEntry, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.yellow, size=size.small, force_overlay=true)
+        slPriceLabel := label.new(endBar, longSL, "SL  " + str.tostring(longSL, format.mintick), style=label.style_label_left, textcolor=color.white, color=color.red, size=size.tiny, force_overlay=true)
+        tp1PriceLabel := label.new(endBar, longTP1, "TP1  " + str.tostring(longTP1, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.lime, size=size.tiny, force_overlay=true)
+        tp2PriceLabel := label.new(endBar, longTP2, "TP2  " + str.tostring(longTP2, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.lime, size=size.tiny, force_overlay=true)
+        tp3PriceLabel := label.new(endBar, longTP3, "TP3  " + str.tostring(longTP3, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.lime, size=size.tiny, force_overlay=true)
+        tp4PriceLabel := label.new(endBar, longTP4, "TP4  " + str.tostring(longTP4, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.lime, size=size.tiny, force_overlay=true)
 
 if shortSignal
     f_clear_plan()
-    entryLine := line.new(bar_index, shortEntry, bar_index + 40, shortEntry, extend=extend.none, style=line.style_dashed, width=2)
-    slLine := line.new(bar_index, shortSL, bar_index + 40, shortSL, extend=extend.none, width=2)
-    tp1Line := line.new(bar_index, shortTP1, bar_index + 40, shortTP1)
-    tp2Line := line.new(bar_index, shortTP2, bar_index + 40, shortTP2)
-    tp3Line := line.new(bar_index, shortTP3, bar_index + 40, shortTP3)
-    tp4Line := line.new(bar_index, shortTP4, bar_index + 40, shortTP4)
+    endBar = bar_index + planBars
+    entryLine := line.new(bar_index, shortEntry, endBar, shortEntry, extend=extend.none, color=color.yellow, style=line.style_dashed, width=3, force_overlay=true)
+    slLine := line.new(bar_index, shortSL, endBar, shortSL, extend=extend.none, color=color.red, width=2, force_overlay=true)
+    tp1Line := line.new(bar_index, shortTP1, endBar, shortTP1, color=color.aqua, width=1, force_overlay=true)
+    tp2Line := line.new(bar_index, shortTP2, endBar, shortTP2, color=color.aqua, width=1, force_overlay=true)
+    tp3Line := line.new(bar_index, shortTP3, endBar, shortTP3, color=color.aqua, width=1, force_overlay=true)
+    tp4Line := line.new(bar_index, shortTP4, endBar, shortTP4, color=color.aqua, width=1, force_overlay=true)
     if showZones
-        zoneBox := box.new(bar_index, shortZoneHigh, bar_index + 40, shortZoneLow, bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 55))
-    infoLabel := label.new(bar_index, high, "SHORT 🔴\n" + shortLevelName + " sweep → 15M BOS\n" + shortEntryType + "\nLIMIT " + str.tostring(shortEntry, format.mintick) + "\nSL " + str.tostring(shortSL, format.mintick), style=label.style_label_down, textcolor=color.white, color=color.new(color.red, 15))
+        zoneBox := box.new(bar_index, shortZoneHigh, endBar, shortZoneLow, bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 55), force_overlay=true)
+    infoLabel := label.new(bar_index, high, "SHORT 🔴\n" + shortLevelName + " sweep → 15M BOS\n" + shortEntryType, style=label.style_label_down, textcolor=color.white, color=color.new(color.red, 15), force_overlay=true)
+    if showPriceLabels
+        entryPriceLabel := label.new(endBar, shortEntry, "ENTRY  " + str.tostring(shortEntry, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.yellow, size=size.small, force_overlay=true)
+        slPriceLabel := label.new(endBar, shortSL, "SL  " + str.tostring(shortSL, format.mintick), style=label.style_label_left, textcolor=color.white, color=color.red, size=size.tiny, force_overlay=true)
+        tp1PriceLabel := label.new(endBar, shortTP1, "TP1  " + str.tostring(shortTP1, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.aqua, size=size.tiny, force_overlay=true)
+        tp2PriceLabel := label.new(endBar, shortTP2, "TP2  " + str.tostring(shortTP2, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.aqua, size=size.tiny, force_overlay=true)
+        tp3PriceLabel := label.new(endBar, shortTP3, "TP3  " + str.tostring(shortTP3, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.aqua, size=size.tiny, force_overlay=true)
+        tp4PriceLabel := label.new(endBar, shortTP4, "TP4  " + str.tostring(shortTP4, format.mintick), style=label.style_label_left, textcolor=color.black, color=color.aqua, size=size.tiny, force_overlay=true)
 
-// Optional liquidity display.
-plot(showLevels ? pdh : na, "PDH", color=color.new(color.red, 65), style=plot.style_linebr)
-plot(showLevels ? pdl : na, "PDL", color=color.new(color.green, 65), style=plot.style_linebr)
-plot(showLevels ? pwh : na, "PWH", color=color.new(color.red, 45), style=plot.style_linebr)
-plot(showLevels ? pwl : na, "PWL", color=color.new(color.green, 45), style=plot.style_linebr)
-plot(showLevels ? pmh : na, "PMH", color=color.new(color.red, 25), style=plot.style_linebr)
-plot(showLevels ? pml : na, "PML", color=color.new(color.green, 25), style=plot.style_linebr)
+// Optional liquidity display - also forced onto the main chart.
+plot(showLevels ? pdh : na, "PDH", color=color.new(color.red, 65), style=plot.style_linebr, force_overlay=true)
+plot(showLevels ? pdl : na, "PDL", color=color.new(color.green, 65), style=plot.style_linebr, force_overlay=true)
+plot(showLevels ? pwh : na, "PWH", color=color.new(color.red, 45), style=plot.style_linebr, force_overlay=true)
+plot(showLevels ? pwl : na, "PWL", color=color.new(color.green, 45), style=plot.style_linebr, force_overlay=true)
+plot(showLevels ? pmh : na, "PMH", color=color.new(color.red, 25), style=plot.style_linebr, force_overlay=true)
+plot(showLevels ? pml : na, "PML", color=color.new(color.green, 25), style=plot.style_linebr, force_overlay=true)
 
 // ------------------------- ALERTS -------------------------
 alertcondition(watchLong and not watchLong[1], "Trade Vision WATCH LONG", "Trade Vision: HTF liquidity sweep/reclaim. Waiting for 15M bullish BOS.")
