@@ -1,0 +1,34 @@
+name: BTC 1H LIMIT vs MARKET Fast
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run 1H comparison
+        run: python -m backtest.run_btc_1h_fast
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-1h-limit-vs-market-fast
+          path: |
+            backtest_btc_1h_limit.csv
+            backtest_btc_1h_market.csv
+          if-no-files-found: warn
