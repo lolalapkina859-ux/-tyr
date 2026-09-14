@@ -1,0 +1,38 @@
+name: BTC Equal Liquidity Fast
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fast equal-liquidity experiment
+        run: |
+          python -m backtest.equal_liquidity_fast \
+            --baseline backtest/data/backtest_btc_ob_filtered_1_10.csv \
+            --start "2026-03-01T00:00:00+00:00" \
+            --end "2026-09-01T00:00:00+00:00" \
+            --tolerance 0.0010 \
+            --pool-lookback 192 \
+            --sweep-window 24 \
+            --out backtest_btc_equal_liquidity.csv
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-equal-liquidity-fast
+          path: backtest_btc_equal_liquidity.csv
