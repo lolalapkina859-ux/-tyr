@@ -1,0 +1,20 @@
+name: Purple Cloud TOP10 30M OOS
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - run: python -m backtest.purple_cloud_top10_30m_oos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-top10-30m-oos-results
+          path: |
+            backtest/data/purple_cloud_top10_30m_oos_summary.csv
+            backtest/data/purple_cloud_top10_30m_oos_detail.csv
