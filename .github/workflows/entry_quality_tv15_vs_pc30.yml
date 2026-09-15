@@ -1,0 +1,24 @@
+name: Entry Quality TV15 vs PC30
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Compare entry quality
+        run: python -m backtest.entry_quality_tv15_vs_pc30
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: entry-quality-tv15-vs-pc30-results
+          path: |
+            backtest/data/entry_quality_tv15_vs_pc30_summary.csv
+            backtest/data/entry_quality_tv15_vs_pc30_detail.csv
+          if-no-files-found: warn
