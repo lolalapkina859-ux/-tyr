@@ -1,0 +1,24 @@
+name: Trade Vision vs PC30 Management
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Compare TP1 BE vs Purple Cloud 30M management
+        run: python -m backtest.tradevision_pc30_management_test
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradevision-pc30-management-results
+          path: |
+            backtest/data/tradevision_pc30_management_summary.csv
+            backtest/data/tradevision_pc30_management_detail.csv
+          if-no-files-found: warn
