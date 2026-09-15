@@ -1,0 +1,25 @@
+name: Purple Cloud Standalone Backtest
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run standalone Purple Cloud test
+        run: python -m backtest.purple_cloud_standalone_test
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-standalone-results
+          path: |
+            backtest/data/purple_cloud_standalone_summary.csv
+            backtest/data/purple_cloud_standalone_detail.csv
+          if-no-files-found: warn
