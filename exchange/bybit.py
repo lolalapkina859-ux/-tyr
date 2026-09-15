@@ -5,14 +5,13 @@ import pandas as pd
 
 BINGX_BASE_URL = "https://open-api.bingx.com"
 
-# Non-crypto synthetic/index/commodity contracts that must never enter
-# the Trade Vision crypto scanner, even if they rank in BingX TOP volume.
-EXCLUDED_SYMBOLS = {
-    "NCSKASML2USDUSDT",
-    "NCCOXAG2USDUSDT",
-    "NCCOGOLD2USDUSDT",
-    "NCSINASDAQ1002USDUSDT",
-}
+# Trade Vision is crypto-only.
+# BingX synthetic contracts for stocks / indices / metals use NC-prefixed
+# symbols (for example NCSKNVDA2USDUSDT, NCSINASDAQ1002USDUSDT,
+# NCCOGOLD2USDUSDT, NCCOXAG2USDUSDT). They must never enter the scanner.
+def _is_crypto_symbol(symbol: str) -> bool:
+    clean_symbol = symbol.upper().replace("-", "")
+    return clean_symbol.endswith("USDT") and not clean_symbol.startswith("NC")
 
 
 # =========================================================
@@ -184,7 +183,7 @@ def get_klines(
 # =========================================================
 
 def get_top_symbols(limit: int = 30) -> list[str]:
-    """Gets the most liquid BingX USDT perpetual crypto pairs."""
+    """Gets the most liquid BingX USDT perpetual crypto pairs only."""
 
     url = f"{BINGX_BASE_URL}/openApi/swap/v2/quote/ticker"
     headers = {"User-Agent": "TradeVision24-7"}
@@ -215,9 +214,9 @@ def get_top_symbols(limit: int = 30) -> list[str]:
 
             clean_symbol = symbol.replace("-", "").upper()
 
-            # Hard exclusion before ranking so excluded contracts do not
-            # consume slots in TOP_SYMBOLS_LIMIT.
-            if clean_symbol in EXCLUDED_SYMBOLS:
+            # Crypto-only scanner: reject the whole BingX NC synthetic family
+            # before volume ranking, so stocks/indices/metals consume no TOP slots.
+            if not _is_crypto_symbol(clean_symbol):
                 continue
 
             quote_volume = (
@@ -253,7 +252,7 @@ def get_top_symbols(limit: int = 30) -> list[str]:
 
         symbols = [symbol for symbol, _ in ranked[:limit]]
 
-        print(f"[BingX] TOP {len(symbols)} symbols: {symbols}")
+        print(f"[BingX] TOP {len(symbols)} crypto symbols: {symbols}")
         return symbols
 
     except Exception as exc:
