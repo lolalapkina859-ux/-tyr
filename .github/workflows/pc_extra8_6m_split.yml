@@ -1,0 +1,21 @@
+name: PC30 Extra 8 Crypto 6M Split
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - run: python -m backtest.purple_cloud_extra8_6m_split
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pc30-extra8-crypto-6m-split-results
+          path: |
+            backtest/data/pc_extra8_6m_split_summary.csv
+            backtest/data/pc_extra8_6m_split_ranking.csv
+            backtest/data/pc_extra8_6m_split_detail.csv
