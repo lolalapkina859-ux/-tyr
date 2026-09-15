@@ -1,0 +1,22 @@
+name: PC30 Cross 100 Margin 3 20x
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - run: python -m backtest.purple_cloud_10coins_30m_no_sl
+      - run: python -m backtest.purple_cloud_10coins_30m_cross100_margin3_20x
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pc30-cross100-margin3-20x-results
+          path: |
+            backtest/data/pc10_cross100_margin3_20x_summary.csv
+            backtest/data/pc10_cross100_margin3_20x_by_symbol.csv
+            backtest/data/pc10_cross100_margin3_20x_equity.csv
