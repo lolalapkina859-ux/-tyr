@@ -1,0 +1,24 @@
+name: PC30 State Filter TV FVG75
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Test PC30 trend state as filter before Trade Vision FVG75 entry
+        run: python -m backtest.pc30_state_filter_tv_fvg75
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pc30-state-filter-tv-fvg75-results
+          path: |
+            backtest/data/pc30_state_filter_tv_fvg75_summary.csv
+            backtest/data/pc30_state_filter_tv_fvg75_detail.csv
+          if-no-files-found: warn
