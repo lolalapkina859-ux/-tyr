@@ -75,8 +75,6 @@ def main():
   c15=download_klines(symbol,"15m",START,END).reset_index(drop=True);c15["time"]=pd.to_datetime(c15["time"],utc=True)
   c30=download_klines(symbol,"30m",START,END).reset_index(drop=True);c30["time"]=pd.to_datetime(c30["time"],utc=True)
   pc30=purple_cloud(c30).reset_index(drop=True).copy()
-  # purple_cloud may already return source OHLCV/time columns. Never concat a second
-  # time column: duplicate labels break pandas boolean filtering/reindexing.
   if "time" not in pc30.columns:
    pc30.insert(0,"time",c30["time"].values)
   else:
@@ -89,6 +87,7 @@ def main():
     rows.append({**r.to_dict(),"asset":asset,"mode":mode,"status_new":st,"realized_r_new":val,"highest_tp_new":hi,"pc30_exit":used,"pc30_exit_time":xt})
    d=pd.DataFrame(rows);details.append(d);sums.append(summ(d,asset,mode))
  detail=pd.concat(details,ignore_index=True)
- for mode in ("BASE_TP1_BE","PC30_NO_BE"):sums.append(summ(detail[detail.mode==mode],"ALL",mode))
+ for mode in ("BASE_TP1_BE","PC30_NO_BE"):
+  sums.append(summ(detail[detail["mode"]==mode],"ALL",mode))
  summary=pd.DataFrame(sums);detail.to_csv(out/"tradevision_pc30_management_detail.csv",index=False);summary.to_csv(out/"tradevision_pc30_management_summary.csv",index=False);print(summary.to_string(index=False))
 if __name__=="__main__":main()
