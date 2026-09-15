@@ -34,7 +34,6 @@ def simulate(r,c15,pc30,mode):
   new=hi
   for j,t in enumerate(ts,1):
    if hit(side,h,l,t):new=max(new,j)
-  # PC30 signal only after its 30m candle has closed: map 15m time to latest closed 30m bar.
   pcopp=False; pcprice=None
   if mode=="PC30_NO_BE":
    closed=pc30[pc30.time+pd.Timedelta(minutes=30)<=b.time+pd.Timedelta(minutes=15)]
@@ -73,9 +72,16 @@ def main():
   for c in ("score","entry","sl","tp1","tp2","tp3","tp4"):
    if c in s:s[c]=pd.to_numeric(s[c],errors="coerce")
   s=s[s.apply(gate,axis=1)&s.entry_time.notna()].copy()
-  c15=download_klines(symbol,"15m",START,END).reset_index(drop=True);c15.time=pd.to_datetime(c15.time,utc=True)
-  c30=download_klines(symbol,"30m",START,END).reset_index(drop=True);c30.time=pd.to_datetime(c30.time,utc=True)
-  pc30=purple_cloud(c30); pc30=pd.concat([c30[["time"]],pc30],axis=1)
+  c15=download_klines(symbol,"15m",START,END).reset_index(drop=True);c15["time"]=pd.to_datetime(c15["time"],utc=True)
+  c30=download_klines(symbol,"30m",START,END).reset_index(drop=True);c30["time"]=pd.to_datetime(c30["time"],utc=True)
+  pc30=purple_cloud(c30).reset_index(drop=True).copy()
+  # purple_cloud may already return source OHLCV/time columns. Never concat a second
+  # time column: duplicate labels break pandas boolean filtering/reindexing.
+  if "time" not in pc30.columns:
+   pc30.insert(0,"time",c30["time"].values)
+  else:
+   pc30["time"]=pd.to_datetime(pc30["time"],utc=True)
+  pc30=pc30.loc[:,~pc30.columns.duplicated()].copy()
   for mode in ("BASE_TP1_BE","PC30_NO_BE"):
    rows=[]
    for ix,r in s.iterrows():
