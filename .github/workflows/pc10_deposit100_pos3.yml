@@ -1,0 +1,22 @@
+name: PC30 10 Coins Deposit 100 Position 3
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - run: python -m backtest.purple_cloud_10coins_30m_no_sl
+      - run: python -m backtest.purple_cloud_10coins_30m_deposit100_pos3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pc10-deposit100-pos3-results
+          path: |
+            backtest/data/pc10_deposit100_pos3_summary.csv
+            backtest/data/pc10_deposit100_pos3_by_symbol.csv
+            backtest/data/pc10_deposit100_pos3_equity.csv
