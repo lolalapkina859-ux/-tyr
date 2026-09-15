@@ -1,0 +1,22 @@
+name: PC30 35 Candidates 6M Split
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - run: python -m backtest.purple_cloud_35_candidates_6m_split
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pc30-35-candidates-6m-split-results
+          path: |
+            backtest/data/pc35_6m_split_summary.csv
+            backtest/data/pc35_6m_split_ranking.csv
+            backtest/data/pc35_6m_split_detail.csv
+            backtest/data/pc35_6m_split_skipped.csv
