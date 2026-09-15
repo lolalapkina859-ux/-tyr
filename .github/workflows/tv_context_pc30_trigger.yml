@@ -1,0 +1,24 @@
+name: TV Context PC30 Trigger Test
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Compare FVG75 with PC30 trigger inside Trade Vision context
+        run: python -m backtest.tv_context_pc30_trigger_test
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tv-context-pc30-trigger-results
+          path: |
+            backtest/data/tv_context_pc30_trigger_summary.csv
+            backtest/data/tv_context_pc30_trigger_detail.csv
+          if-no-files-found: warn
