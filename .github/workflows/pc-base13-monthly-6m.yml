@@ -1,0 +1,32 @@
+name: Purple Cloud - BASE13 Monthly Verification 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+      - name: Run BASE13 verification
+        run: python -m backtest.pc_base13_monthly_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base13-monthly-verification-6m-results
+          path: |
+            backtest/data/pc_base13_monthly_6m_full_summary.csv
+            backtest/data/pc_base13_monthly_6m_summary.csv
+            backtest/data/pc_base13_monthly_6m_trades.csv
+            backtest/data/pc_base13_monthly_6m_per_symbol.csv
+            backtest/data/pc_base13_monthly_6m_failures.csv
+          if-no-files-found: warn
