@@ -1,0 +1,38 @@
+name: Purple Cloud - 17 Coin Unified Cross 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+
+      - name: Run Purple Cloud 17 Coin Unified Cross 6M
+        run: python -m backtest.pc17_unified_cross_6m
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-17-coin-unified-cross-6m-results
+          path: |
+            backtest/data/pc17_unified_cross_6m_summary.csv
+            backtest/data/pc17_unified_cross_6m_by_symbol.csv
+            backtest/data/pc17_unified_cross_6m_trades.csv
+            backtest/data/pc17_unified_cross_6m_equity.csv
+            backtest/data/pc17_unified_cross_6m_failures.csv
+          if-no-files-found: warn
