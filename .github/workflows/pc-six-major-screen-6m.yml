@@ -1,0 +1,30 @@
+name: Purple Cloud - BTC SOL ARB WIF PEPE LINK 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+      - name: Run six-coin Purple Cloud screen
+        run: python -m backtest.pc_six_major_screen_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-btc-sol-arb-wif-pepe-link-6m-results
+          path: |
+            backtest/data/pc_six_major_screen_6m_summary.csv
+            backtest/data/pc_six_major_screen_6m_trades.csv
+            backtest/data/pc_six_major_screen_6m_failures.csv
+          if-no-files-found: warn
