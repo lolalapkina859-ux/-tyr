@@ -1,0 +1,28 @@
+name: Purple Cloud - BASE13 $120 Balance 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run BASE13 with $120 starting balance
+        run: python -m backtest.pc_base13_balance120_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base13-balance120-6m-results
+          path: |
+            backtest/data/pc13_to_17_compare_6m_summary.csv
+            backtest/data/pc13_to_17_compare_6m_trades.csv
+            backtest/data/pc13_to_17_compare_6m_equity.csv
+            backtest/data/pc13_to_17_compare_6m_failures.csv
