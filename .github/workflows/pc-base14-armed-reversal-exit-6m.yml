@@ -1,0 +1,27 @@
+name: Purple Cloud - BASE14 Armed Reversal Exit 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run armed structural reversal exit comparison
+        run: python -m backtest.pc_base14_armed_reversal_exit_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base14-armed-reversal-exit-6m-results
+          path: |
+            backtest/data/pc_base14_armed_reversal_exit_summary.csv
+            backtest/data/pc_base14_armed_reversal_exit_trades.csv
+          if-no-files-found: warn
