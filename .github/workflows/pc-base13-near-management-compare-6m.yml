@@ -1,0 +1,24 @@
+name: Purple Cloud - BASE13 + NEAR Management Compare 6M
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Run comparison
+        run: python -m backtest.pc_base13_near_management_compare_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base13-near-management-compare-results
+          path: |
+            backtest/data/pc_base13_near_management_compare_summary.csv
+            backtest/data/pc_base13_near_management_compare_trades.csv
+            backtest/data/pc_base13_near_management_compare_by_symbol.csv
