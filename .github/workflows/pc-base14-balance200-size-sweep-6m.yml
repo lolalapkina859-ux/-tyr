@@ -1,0 +1,27 @@
+name: Purple Cloud - BASE14 $200 Size Sweep 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run $200 balance size sweep
+        run: python -m backtest.pc_base14_balance200_size_sweep_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base14-balance200-size-sweep-6m-results
+          path: |
+            backtest/data/pc_base14_balance200_size_sweep_summary.csv
+            backtest/data/pc_base14_balance200_size_sweep_trades.csv
+          if-no-files-found: warn
