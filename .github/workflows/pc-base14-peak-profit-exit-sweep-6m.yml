@@ -1,0 +1,27 @@
+name: Purple Cloud - BASE14 Peak Profit Exit Sweep 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run Peak Profit Exit sweep
+        run: python -m backtest.pc_base14_peak_profit_exit_sweep_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base14-peak-profit-exit-sweep-6m-results
+          path: |
+            backtest/data/pc_base14_peak_profit_exit_sweep_summary.csv
+            backtest/data/pc_base14_peak_profit_exit_sweep_trades.csv
+          if-no-files-found: warn
