@@ -1,0 +1,27 @@
+name: Purple Cloud - BRUSDT Screen
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run BRUSDT screen
+        run: python -m backtest.pc_br_screen
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-brusdt-screen-results
+          path: |
+            backtest/data/pc_br_screen_summary.csv
+            backtest/data/pc_br_screen_trades.csv
+          if-no-files-found: warn
