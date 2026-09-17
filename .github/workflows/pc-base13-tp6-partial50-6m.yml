@@ -1,0 +1,25 @@
+name: Purple Cloud - BASE13 TP6 Partial50 6M
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Run backtest
+        run: python -m backtest.pc_base13_tp6_partial50_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base13-tp6-partial50-results
+          path: |
+            backtest/data/pc_base13_tp6_partial50_summary.csv
+            backtest/data/pc_base13_tp6_partial50_trades.csv
+            backtest/data/pc_base13_tp6_partial50_partials.csv
+            backtest/data/pc_base13_tp6_partial50_by_symbol.csv
