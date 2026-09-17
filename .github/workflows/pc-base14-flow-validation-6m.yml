@@ -1,0 +1,29 @@
+name: Purple Cloud - BASE14 FLOW Validation 6M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run FLOW validation
+        run: python -m backtest.pc_base14_flow_validation_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base14-flow-validation-6m-results
+          path: |
+            backtest/data/pc_base14_flow_combo_summary.csv
+            backtest/data/pc_base14_flow_combo_trades.csv
+            backtest/data/pc_base14_flow_monthly_summary.csv
+            backtest/data/pc_base14_flow_monthly_increment.csv
+          if-no-files-found: warn
