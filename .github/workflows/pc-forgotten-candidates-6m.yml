@@ -1,0 +1,25 @@
+name: Purple Cloud - Forgotten Candidates Rescreen 6M
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Rescreen candidates
+        run: python -m backtest.pc_forgotten_candidates_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-forgotten-candidates-results
+          path: |
+            backtest/data/pc_forgotten_candidates_summary.csv
+            backtest/data/pc_forgotten_candidates_ranking.csv
+            backtest/data/pc_forgotten_candidates_winners.csv
+            backtest/data/pc_forgotten_candidates_skipped.csv
