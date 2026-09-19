@@ -1,0 +1,23 @@
+name: Chandelier Exit - BASE15 30M 6M
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Run standalone CE
+        run: python -m backtest.ce_base15_30m_6m
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chandelier-exit-base15-30m-6m-results
+          path: |
+            backtest/data/ce_base15_30m_6m_summary.csv
+            backtest/data/ce_base15_30m_6m_trades.csv
+          if-no-files-found: warn
