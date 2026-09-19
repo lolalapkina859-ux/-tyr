@@ -1,0 +1,33 @@
+name: Purple Cloud - BASE15 Weekend Filter 6M
+on:
+  workflow_dispatch:
+    inputs:
+      start_balance:
+        description: 'Starting balance in USDT'
+        required: true
+        default: '145.58352658'
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run weekend test
+        env:
+          PC_TEST_START_BALANCE: ${{ inputs.start_balance }}
+        run: python -m backtest.pc_base15_weekend_filter_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base15-weekend-filter-6m-results
+          path: |
+            backtest/data/pc_base15_weekend_filter_summary.csv
+            backtest/data/pc_base15_weekend_filter_trades.csv
+            backtest/data/pc_base15_weekend_entry_stats.csv
+          if-no-files-found: warn
