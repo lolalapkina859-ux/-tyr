@@ -97,7 +97,7 @@ def run(data, variant):
      else:
       structure=(p["side"]=="LONG" and px<p["broken"]) or (p["side"]=="SHORT" and px>p["broken"])
       momentum=(p["side"]=="LONG" and float(r["hist"])<0) or (p["side"]=="SHORT" and float(r["hist"])>0)
-      priceconf=(p["side"]=="LONG" and px<float(r.open) and px<float(data[s].iloc[i-1].close)) or (p["side"]=="SHORT" and px>float(r.open) and px>float(data[s].iloc[i-1].close))
+      priceconf=(p["side"]=="LONG" and px<float(r["close"]) and px<float(data[s].iloc[i-1]["close"])) or (p["side"]=="SHORT" and px>float(r["close"]) and px>float(data[s].iloc[i-1]["close"]))
       score=int(structure)+int(momentum)+int(priceconf)
       if age>=1 and age<=WATCH_BARS and score>=CONFIRM_N and cur>0:
        do_exit=True; reason="V4_1_EXIT"
