@@ -1,0 +1,25 @@
+name: Purple Cloud - BASE15 Anti Whipsaw Swing Break 6M
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Run anti-whipsaw swing-break test
+        run: python -m backtest.pc_base15_anti_whipsaw_swing_break_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base15-anti-whipsaw-swing-break-6m-results
+          path: |
+            backtest/data/pc_base15_anti_whipsaw_swing_break_summary.csv
+            backtest/data/pc_base15_anti_whipsaw_swing_break_trades.csv
+          if-no-files-found: warn
