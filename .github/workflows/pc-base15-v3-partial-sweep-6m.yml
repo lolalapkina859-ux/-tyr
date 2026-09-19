@@ -1,0 +1,30 @@
+name: Purple Cloud - BASE15 V3 Partial Exit Sweep 6M
+on:
+  workflow_dispatch:
+    inputs:
+      start_balance:
+        description: Starting balance USDT
+        required: true
+        default: '145.58352658'
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - name: Run V3 partial exit sweep
+        env:
+          PC_TEST_START_BALANCE: ${{ inputs.start_balance }}
+        run: python -m backtest.pc_base15_v3_partial_sweep_6m
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-base15-v3-partial-exit-sweep-6m-results
+          path: |
+            backtest/data/pc_base15_v3_partial_sweep_summary.csv
+            backtest/data/pc_base15_v3_partial_sweep_trades.csv
+          if-no-files-found: warn
