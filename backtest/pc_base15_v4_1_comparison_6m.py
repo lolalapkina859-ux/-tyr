@@ -54,7 +54,7 @@ def run(data, variant):
    if p["peak_move"]>=GATE: p["gate"]=True
    mom=max(float(r["hist"]),0) if p["side"]=="LONG" else max(-float(r["hist"]),0)
    p["peak_mom"]=max(p["peak_mom"],mom)
-   piv=float(r["pivot_low_confirmed"]) if p["side"]=="LONG" else float(r["pivot_high_confirmed"])
+   piv=float(r["pivot_low"]) if p["side"]=="LONG" else float(r["pivot_high"])
    if not np.isnan(piv): p["last_pivot"]=piv
 
    if variant!="NATIVE_PC":
@@ -112,7 +112,7 @@ def run(data, variant):
   if sig and s not in pos:
    if eq()-gross()/LEVERAGE>=NOTIONAL/LEVERAGE:
     mom=max(float(r["hist"]),0) if sig=="LONG" else max(-float(r["hist"]),0)
-    lp=float(r["pivot_low_confirmed"]) if sig=="LONG" else float(r["pivot_high_confirmed"])
+    lp=float(r["pivot_low"]) if sig=="LONG" else float(r["pivot_high"])
     pos[s]={"side":sig,"entry":px,"time":tm,"bars":0,"peak_ret":0.,"peak_move":0.,"gate":False,
       "peak_mom":mom,"last_pivot":lp,"armed":False,"armed_i":-1,"protected":np.nan,
       "watch":False,"watch_i":-1,"broken":np.nan,"wait_new":False,"rejected":np.nan}
