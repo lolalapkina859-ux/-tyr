@@ -1,0 +1,32 @@
+name: Purple Cloud vs Lorentzian - BASE15 30M 6M
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout official Lorentzian port
+        uses: actions/checkout@v4
+        with:
+          repository: artificial-intelligence-edge/lorentzian-classification
+          path: vendor/lorentzian-classification
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas numpy requests
+      - name: Validate Lorentzian Python parity fixtures
+        run: PYTHONPATH=vendor/lorentzian-classification/ports/python python -m lorentzian_classification validate-fixtures
+      - name: Run A B C D comparison
+        run: python -m backtest.pc_lorentzian_abcd_base15_30m_6m
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-cloud-vs-lorentzian-abcd-base15-30m-6m-results
+          path: |
+            backtest/data/pc_lorentzian_abcd_base15_30m_6m_summary.csv
+            backtest/data/pc_lorentzian_abcd_base15_30m_6m_trades.csv
+          if-no-files-found: warn
