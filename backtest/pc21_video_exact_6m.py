@@ -23,6 +23,18 @@ def pc21(df):
  for i in range(1,len(d)): xs[i]=1 if bool(buy.iloc[i]) else (-1 if bool(sell.iloc[i]) else xs[i-1])
  changed=pd.Series(xs).ne(pd.Series(xs).shift(1))
  d["pc_buy"]=buy&changed; d["pc_sell"]=sell&changed
+ # Supertrend 10 / factor 3 filter from Purple Cloud 2.1 Pine.
+ tr=pd.concat([(d.high-d.low),(d.high-d.close.shift(1)).abs(),(d.low-d.close.shift(1)).abs()],axis=1).max(axis=1)
+ at=rma(tr,10); mid=(d.high+d.low)/2; ub=mid+3.0*at; lb=mid-3.0*at
+ fu=ub.copy(); fl=lb.copy(); st=np.full(len(d),np.nan); sd=np.full(len(d),np.nan)
+ for i in range(1,len(d)):
+  fu.iloc[i]=ub.iloc[i] if (ub.iloc[i]<fu.iloc[i-1] or d.close.iloc[i-1]>fu.iloc[i-1]) else fu.iloc[i-1]
+  fl.iloc[i]=lb.iloc[i] if (lb.iloc[i]>fl.iloc[i-1] or d.close.iloc[i-1]<fl.iloc[i-1]) else fl.iloc[i-1]
+  if np.isnan(st[i-1]): sd[i]=1
+  elif st[i-1]==fu.iloc[i-1]: sd[i]=-1 if d.close.iloc[i]>fu.iloc[i] else 1
+  else: sd[i]=1 if d.close.iloc[i]<fl.iloc[i] else -1
+  st[i]=fl.iloc[i] if sd[i]<0 else fu.iloc[i]
+ d["st_dir"]=sd
  d["ema200"]=d.close.ewm(span=200,adjust=False).mean()
  d["atr14"]=atr(d,ATR_PERIOD)
  return d
@@ -77,8 +89,8 @@ def main():
 
   # Video baseline filter: above EMA200 long only, below EMA200 short only.
   sig=None
-  if bool(r.pc_buy) and px>float(r.ema200): sig="LONG"
-  elif bool(r.pc_sell) and px<float(r.ema200): sig="SHORT"
+  if bool(r.pc_buy) and float(r.st_dir)<0 and px>float(r.ema200): sig="LONG"
+  elif bool(r.pc_sell) and float(r.st_dir)>0 and px<float(r.ema200): sig="SHORT"
 
   # Entries only while flat on that symbol. Trade management owns exits.
   if sig and s not in pos and np.isfinite(r.atr14):
@@ -107,7 +119,7 @@ def main():
  else: logical=pd.DataFrame(); wins=n=0
  result={"start_balance":START_BALANCE,"final_balance":final,"net_profit_usdt":final-START_BALANCE,"return_pct":(final/START_BALANCE-1)*100,"logical_trades":n,"wins":wins,"winrate":wins/n*100 if n else 0,"max_floating_dd_pct":maxdd,"min_equity":mine,"max_simultaneous_positions":maxpos,"max_gross_notional":maxgross,"skipped_entries_margin":skipped,"liquidated":liq}
  print("\nPURPLE CLOUD 2.1 VIDEO TEST")
- print("P40 A0.9 Pressure0.5 | EMA200 | ATR14 x2 | 50% then BE + ATR trail")
+ print("P40 A0.9 Pressure0.5 | Supertrend10x3 | EMA200 | ATR14 x2 | 50% then BE + ATR trail")
  print(result)
  if len(logical):
   by=logical.groupby("symbol",as_index=False).agg(trades=("pnl_usdt","size"),pnl_usdt=("pnl_usdt","sum"),wins=("pnl_usdt",lambda x:int((x>0).sum())))
