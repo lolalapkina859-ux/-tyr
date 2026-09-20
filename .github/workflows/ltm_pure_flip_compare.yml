@@ -1,0 +1,28 @@
+name: LTM Pure Flip Compare
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pandas numpy requests
+      - name: Run LTM Band 2 / 3 / 4
+        run: python -m backtest.ltm_pure_flip_compare
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltm-pure-flip-compare-results
+          path: backtest/data/ltm_pure_flip_compare_*.csv
+          if-no-files-found: ignore
