@@ -1,0 +1,25 @@
+name: LTM V2 Prune Test
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pandas numpy requests
+      - name: Test V2 pruning
+        run: python -m backtest.ltm_v2_prune_test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ltm-v2-prune-results
+          path: backtest/data/ltm_v2_prune_*.csv
+          if-no-files-found: ignore
