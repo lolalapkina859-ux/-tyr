@@ -13,6 +13,7 @@ from analysis.engine_hybrid import analyze
 from telegram.notifier import send_signal
 from telegram.entry_notifier import send_entry_filled
 from state.store import load_state, already_sent, mark_sent
+from state.paper_account import get_paper_summary
 from state.tracker import (
     register_signal,
     update_symbol,
@@ -407,6 +408,37 @@ def run():
             print(
                 f"[TRACKER] Summary error: {exc}"
             )
+
+        try:
+            paper = get_paper_summary()
+
+            pf = paper["profit_factor"]
+            pf_text = "INF" if pf == float("inf") else f"{pf:.2f}"
+
+            print("\n=== PAPER ACCOUNT V1 ===")
+            print(f"Started: {paper['started_at']}")
+            print(f"Start balance: {paper['start_balance']:.2f} USDT")
+            print(f"Fixed position: {paper['position_notional']:.2f} USDT")
+            print(f"Balance: {paper['balance']:.2f} USDT")
+            print(f"Realized PnL: {paper['realized_pnl']:+.2f} USDT")
+            print(f"Return: {paper['return_pct']:+.2f}%")
+            print(f"New signals: {paper['signals']}")
+            print(f"Filled: {paper['filled']}")
+            print(f"Open: {paper['open']}")
+            print(f"Closed: {paper['closed']}")
+            print(f"Money wins/losses: {paper['wins']}/{paper['losses']}")
+            print(f"Money WinRate: {paper['money_win_rate']:.1f}%")
+            print(
+                f"TP1/TP2/TP3/TP4: "
+                f"{paper['tp1']}/{paper['tp2']}/{paper['tp3']}/{paper['tp4']}"
+            )
+            print(f"Profit Factor: {pf_text}")
+            print(f"Max closed-equity DD: -{paper['max_dd']:.2f} USDT")
+            if paper["ambiguous"]:
+                print(f"Ambiguous: {paper['ambiguous']} (confirmed prior partials only)")
+
+        except Exception as exc:
+            print(f"[PAPER] Summary error: {exc}")
 
         print(
             f"\nScan finished. "
