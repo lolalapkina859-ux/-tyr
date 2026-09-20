@@ -1,0 +1,25 @@
+name: LTM BASE15 V2 Compare
+on:
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pandas numpy requests
+      - name: Compare original vs V2
+        run: python -m backtest.ltm_base15_v2_compare
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ltm-base15-v2-compare-results
+          path: backtest/data/ltm_base15_v2_compare_*.csv
+          if-no-files-found: ignore
