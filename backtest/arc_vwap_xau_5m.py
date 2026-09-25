@@ -1,6 +1,6 @@
 import time, requests, numpy as np, pandas as pd
 
-SYMBOL="GOLD-XAUSDT"
+SYMBOL="GOLD-XAUUSDT"
 INTERVAL="5m"
 START="2026-03-01"
 END="2026-09-01"
