@@ -179,6 +179,38 @@ def floating_risk_test(d,buycol,sellcol,lots=(0.001,0.002,0.003,0.005)):
                      "max_floating_dd_pct":max_float_dd,"equity_below_zero":liquidated})
     return pd.DataFrame(rows)
 
+def intrabar_risk_test(d,buycol,sellcol,lots=(0.001,0.002),spread_usd=0.30):
+    """Conservative 5m risk: mark open trades at adverse candle extreme and charge spread per completed round-trip."""
+    rows=[]
+    for lot in lots:
+        qty=lot*OZ_PER_LOT
+        side=0; entry=0.0; balance=START_BALANCE
+        peak=START_BALANCE; min_eq=START_BALANCE; maxdd=0.0; trades=0
+        gross=0.0; costs=0.0
+        for r in d.itertuples():
+            if side:
+                adverse=float(r.low) if side==1 else float(r.high)
+                eq=balance + qty*side*(adverse-entry)
+                peak=max(peak,balance)
+                min_eq=min(min_eq,eq)
+                if peak>0: maxdd=min(maxdd,(eq-peak)/peak*100)
+            sig=1 if getattr(r,buycol) else (-1 if getattr(r,sellcol) else 0)
+            if sig and sig!=side:
+                if side:
+                    pnl=qty*side*(float(r.close)-entry)
+                    cost=qty*spread_usd
+                    gross+=pnl; costs+=cost; balance+=pnl-cost; trades+=1
+                side=sig; entry=float(r.close)
+                peak=max(peak,balance); min_eq=min(min_eq,balance)
+        if side and len(d):
+            px=float(d.close.iloc[-1]); pnl=qty*side*(px-entry); cost=qty*spread_usd
+            gross+=pnl; costs+=cost; balance+=pnl-cost; trades+=1
+        rows.append({"lot":lot,"spread_usd_per_oz":spread_usd,"trades":trades,
+                     "gross_pnl_usd":gross,"spread_cost_usd":costs,"net_pnl_usd":balance-START_BALANCE,
+                     "final_balance":balance,"min_intrabar_equity":min_eq,
+                     "max_intrabar_dd_pct":maxdd,"equity_below_zero":min_eq<=0})
+    return pd.DataFrame(rows)
+
 def main():
     d=fetch_bingx(); print("CANDLES",len(d),d.time.iloc[0],d.time.iloc[-1])
     s=signals(d)
@@ -196,6 +228,10 @@ def main():
     risk.to_csv("backtest/data/arc_vwap_xau_5m_floating_risk.csv",index=False)
     print("\nVWAP CONFIRMED FLOATING RISK — START BALANCE $150-ish:")
     print(risk.to_string(index=False))
+    intrabar=intrabar_risk_test(s,"conf_buy","conf_sell",spread_usd=0.30)
+    intrabar.to_csv("backtest/data/arc_vwap_xau_5m_intrabar_risk.csv",index=False)
+    print("\nVWAP CONFIRMED INTRABAR HIGH/LOW RISK + $0.30 SPREAD/OZ:")
+    print(intrabar.to_string(index=False))
     s[["time","open","high","low","close","volume","raw_buy","raw_sell","conf_buy","conf_sell"]].to_csv("backtest/data/arc_vwap_xau_5m_signals.csv",index=False)
     print(pd.DataFrame(rows).to_string(index=False))
 
