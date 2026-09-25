@@ -1,0 +1,29 @@
+name: Range Filter BASE15 Test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "backtest/range_filter_base15.py"
+      - ".github/workflows/range_filter_base15.yml"
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pandas numpy requests
+      - name: Run Range Filter 100 x 3.0
+        run: python -m backtest.range_filter_base15
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: range-filter-base15-results
+          path: backtest/data/range_filter_base15_*.csv
+          if-no-files-found: ignore
