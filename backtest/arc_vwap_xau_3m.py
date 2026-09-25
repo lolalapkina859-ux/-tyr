@@ -17,7 +17,7 @@ def fetch_bingx():
     """Download XAUUSD 3-minute spot-gold bars from Dukascopy via dukascopy-node CLI."""
     import subprocess, tempfile, os, glob
     with tempfile.TemporaryDirectory() as td:
-        cmd=["npx","-y","dukascopy-node","-i","xauusd","-from",START,"-to",END,"-t","m3","-f","csv","-dir",td]
+        cmd=["npx","-y","dukascopy-node","-i","xauusd","-from",START,"-to",END,"-t","m1","-f","csv","-dir",td]
         print("DOWNLOAD", " ".join(cmd))
         subprocess.run(cmd,check=True)
         files=glob.glob(os.path.join(td,"*.csv"))
@@ -46,7 +46,10 @@ def fetch_bingx():
     d=d.dropna(subset=["time","open","high","low","close"]).sort_values("time").drop_duplicates("time").reset_index(drop=True)
     if len(d)<1000:
         raise RuntimeError(f"Only {len(d)} XAUUSD candles downloaded")
-    return d[["time","open","high","low","close","volume"]]
+    d=d[["time","open","high","low","close","volume"]].set_index("time")
+    d=d.resample("3min",label="left",closed="left").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna(subset=["open","high","low","close"]).reset_index()
+    print(f"RESAMPLED XAU 3M | candles={len(d)} | first={d['time'].min()} | last={d['time'].max()}")
+    return d
 
 def rma(s,n):
     # TradingView-style RMA: SMA seed then recursive alpha=1/n
