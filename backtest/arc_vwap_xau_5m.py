@@ -152,6 +152,33 @@ def backtest_lots(d,buycol,sellcol):
             "max_closed_dd_usd":float(maxdd),"avg_trade_usd":float(a.mean() if len(a) else 0),
             "best_trade_usd":float(max_win),"worst_trade_usd":float(max_loss)}
 
+def floating_risk_test(d,buycol,sellcol,lots=(0.001,0.002,0.003,0.005)):
+    rows=[]
+    for lot in lots:
+        qty=lot*OZ_PER_LOT
+        side=0; entry=0.0; balance=START_BALANCE; peak_equity=START_BALANCE
+        min_equity=START_BALANCE; max_float_dd=0.0; liquidated=False; trades=0
+        for r in d.itertuples():
+            # mark-to-market before acting on the bar-close signal
+            equity=balance if side==0 else balance + qty*side*(r.close-entry)
+            peak_equity=max(peak_equity,equity)
+            min_equity=min(min_equity,equity)
+            if peak_equity>0:
+                max_float_dd=min(max_float_dd,(equity-peak_equity)/peak_equity*100)
+            if equity<=0:
+                liquidated=True
+            sig=1 if getattr(r,buycol) else (-1 if getattr(r,sellcol) else 0)
+            if sig and sig!=side:
+                if side:
+                    balance += qty*side*(r.close-entry); trades+=1
+                side=sig; entry=r.close
+        if side and len(d):
+            balance += qty*side*(float(d.close.iloc[-1])-entry); trades+=1
+        rows.append({"lot":lot,"trades":trades,"net_pnl_usd":balance-START_BALANCE,
+                     "final_balance":balance,"min_floating_equity":min_equity,
+                     "max_floating_dd_pct":max_float_dd,"equity_below_zero":liquidated})
+    return pd.DataFrame(rows)
+
 def main():
     d=fetch_bingx(); print("CANDLES",len(d),d.time.iloc[0],d.time.iloc[-1])
     s=signals(d)
@@ -165,6 +192,10 @@ def main():
     pd.DataFrame(lot_rows).to_csv("backtest/data/arc_vwap_xau_5m_lot002_summary.csv",index=False)
     print("\n0.02 LOT RESULTS (1 lot = 100 oz):")
     print(pd.DataFrame(lot_rows).to_string(index=False))
+    risk=floating_risk_test(s,"conf_buy","conf_sell")
+    risk.to_csv("backtest/data/arc_vwap_xau_5m_floating_risk.csv",index=False)
+    print("\nVWAP CONFIRMED FLOATING RISK — START BALANCE $150-ish:")
+    print(risk.to_string(index=False))
     s[["time","open","high","low","close","volume","raw_buy","raw_sell","conf_buy","conf_sell"]].to_csv("backtest/data/arc_vwap_xau_5m_signals.csv",index=False)
     print(pd.DataFrame(rows).to_string(index=False))
 
