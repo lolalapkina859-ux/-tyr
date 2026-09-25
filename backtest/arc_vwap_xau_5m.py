@@ -211,6 +211,44 @@ def intrabar_risk_test(d,buycol,sellcol,lots=(0.001,0.002),spread_usd=0.30):
                      "max_intrabar_dd_pct":maxdd,"equity_below_zero":min_eq<=0})
     return pd.DataFrame(rows)
 
+def bingx_cost_test(d,buycol,sellcol,lots=(0.001,0.002),spread_usd=0.30,taker_rate=0.0005):
+    """Stress test: adverse HIGH/LOW equity + spread + taker fee on both entry and exit."""
+    rows=[]
+    for lot in lots:
+        qty=lot*OZ_PER_LOT
+        side=0; entry=0.0; balance=START_BALANCE; peak=START_BALANCE; min_eq=START_BALANCE
+        maxdd=0.0; trades=0; gross=0.0; spread_cost=0.0; fees=0.0
+        for r in d.itertuples():
+            if side:
+                adverse=float(r.low) if side==1 else float(r.high)
+                eq=balance + qty*side*(adverse-entry)
+                peak=max(peak,balance); min_eq=min(min_eq,eq)
+                if peak>0: maxdd=min(maxdd,(eq-peak)/peak*100)
+            sig=1 if getattr(r,buycol) else (-1 if getattr(r,sellcol) else 0)
+            if sig and sig!=side:
+                if side:
+                    px=float(r.close); pnl=qty*side*(px-entry)
+                    exit_fee=qty*px*taker_rate
+                    sc=qty*spread_usd
+                    gross+=pnl; fees+=exit_fee; spread_cost+=sc
+                    balance+=pnl-exit_fee-sc; trades+=1
+                px=float(r.close)
+                entry_fee=qty*px*taker_rate
+                fees+=entry_fee; balance-=entry_fee
+                side=sig; entry=px
+                peak=max(peak,balance); min_eq=min(min_eq,balance)
+        if side and len(d):
+            px=float(d.close.iloc[-1]); pnl=qty*side*(px-entry)
+            exit_fee=qty*px*taker_rate; sc=qty*spread_usd
+            gross+=pnl; fees+=exit_fee; spread_cost+=sc
+            balance+=pnl-exit_fee-sc; trades+=1
+        rows.append({"lot":lot,"taker_rate_pct":taker_rate*100,"spread_usd_per_oz":spread_usd,
+                     "trades":trades,"gross_pnl_usd":gross,"trading_fees_usd":fees,
+                     "spread_cost_usd":spread_cost,"net_pnl_usd":balance-START_BALANCE,
+                     "final_balance":balance,"min_intrabar_equity":min_eq,
+                     "max_intrabar_dd_pct":maxdd,"equity_below_zero":min_eq<=0})
+    return pd.DataFrame(rows)
+
 def main():
     d=fetch_bingx(); print("CANDLES",len(d),d.time.iloc[0],d.time.iloc[-1])
     s=signals(d)
@@ -232,6 +270,10 @@ def main():
     intrabar.to_csv("backtest/data/arc_vwap_xau_5m_intrabar_risk.csv",index=False)
     print("\nVWAP CONFIRMED INTRABAR HIGH/LOW RISK + $0.30 SPREAD/OZ:")
     print(intrabar.to_string(index=False))
+    bingx=bingx_cost_test(s,"conf_buy","conf_sell",spread_usd=0.30,taker_rate=0.0005)
+    bingx.to_csv("backtest/data/arc_vwap_xau_5m_bingx_costs.csv",index=False)
+    print("\nVWAP CONFIRMED BINGX COST STRESS — 0.05% TAKER EACH SIDE + $0.30/OZ SPREAD:")
+    print(bingx.to_string(index=False))
     s[["time","open","high","low","close","volume","raw_buy","raw_sell","conf_buy","conf_sell"]].to_csv("backtest/data/arc_vwap_xau_5m_signals.csv",index=False)
     print(pd.DataFrame(rows).to_string(index=False))
 
