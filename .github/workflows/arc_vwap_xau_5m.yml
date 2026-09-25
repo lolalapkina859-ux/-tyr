@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pandas numpy requests
+      - uses: actions/setup-node@v4\n        with:\n          node-version: "20"\n      - run: pip install pandas numpy requests
       - name: Run Arc VWAP on BingX GOLD-XAU 5m
         run: python -m backtest.arc_vwap_xau_5m
       - uses: actions/upload-artifact@v4
