@@ -27,7 +27,13 @@ def fetch_bingx():
     tcol=next((x for x in ["timestamp","time","date","datetime"] if x in d.columns),None)
     if tcol is None:
         raise RuntimeError(f"Unknown Dukascopy columns: {list(d.columns)}")
-    d["time"]=pd.to_datetime(d[tcol],utc=True,errors="coerce")
+    raw_ts=d[tcol]
+    if pd.api.types.is_numeric_dtype(raw_ts) or pd.to_numeric(raw_ts,errors="coerce").notna().mean() > 0.95:
+        # dukascopy-node emits Unix timestamps in milliseconds (e.g. 1612137600000).
+        nums=pd.to_numeric(raw_ts,errors="coerce")
+        d["time"]=pd.to_datetime(nums,unit="ms",utc=True,errors="coerce")
+    else:
+        d["time"]=pd.to_datetime(raw_ts,utc=True,errors="coerce")
     need=["open","high","low","close"]
     if any(x not in d.columns for x in need):
         raise RuntimeError(f"Missing OHLC columns: {list(d.columns)}")
