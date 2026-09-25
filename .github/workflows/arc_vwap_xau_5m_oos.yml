@@ -1,0 +1,28 @@
+name: Arc VWAP XAU 5m OOS Test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "backtest/arc_vwap_xau_5m_oos.py"
+      - ".github/workflows/arc_vwap_xau_5m_oos.yml"
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install pandas numpy requests
+      - name: Run Arc VWAP XAUUSD 5m OOS
+        run: python -m backtest.arc_vwap_xau_5m_oos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arc-vwap-xau-5m-oos-results
+          path: backtest/data/arc_vwap_xau_5m_oos_*.csv
+          if-no-files-found: ignore
