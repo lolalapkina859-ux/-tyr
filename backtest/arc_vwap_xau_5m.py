@@ -12,37 +12,33 @@ NOTIONAL=60.0
 START_BALANCE=145.58352658
 
 def fetch_bingx():
-    url="https://open-api.bingx.com/openApi/swap/v3/quote/klines"
-    start=int(pd.Timestamp(START,tz="UTC").timestamp()*1000)
-    end=int(pd.Timestamp(END,tz="UTC").timestamp()*1000)-1
-    out=[]
-    cursor=end
-    for _ in range(500):
-        r=requests.get(url,params={"symbol":SYMBOL,"interval":INTERVAL,"limit":1440,"endTime":cursor},timeout=30)
-        j=r.json()
-        if j.get("code",0)!=0:
-            raise RuntimeError(j)
-        data=j.get("data",[])
-        if not data: break
-        rows=[]
-        for x in data:
-            if isinstance(x,dict):
-                ts=int(x.get("time",x.get("timestamp",0)))
-                rows.append([ts,float(x["open"]),float(x["high"]),float(x["low"]),float(x["close"]),float(x.get("volume",0))])
-            else:
-                # BingX public kline array fallback: time,open,close,high,low,volume...
-                ts=int(x[0]); rows.append([ts,float(x[1]),float(x[3]),float(x[4]),float(x[2]),float(x[5])])
-        out.extend(rows)
-        mn=min(x[0] for x in rows)
-        if mn<=start: break
-        cursor=mn-1
-        time.sleep(0.06)
-    d=pd.DataFrame(out,columns=["time","open","high","low","close","volume"]).drop_duplicates("time").sort_values("time")
-    d=d[(d.time>=start)&(d.time<=end)].reset_index(drop=True)
+    """Download XAUUSD 5-minute spot-gold bars from Dukascopy via dukascopy-node CLI."""
+    import subprocess, tempfile, os, glob
+    with tempfile.TemporaryDirectory() as td:
+        cmd=["npx","-y","dukascopy-node","-i","xauusd","-from",START,"-to",END,"-t","m5","-f","csv","-dir",td]
+        print("DOWNLOAD", " ".join(cmd))
+        subprocess.run(cmd,check=True)
+        files=glob.glob(os.path.join(td,"*.csv"))
+        if not files:
+            raise RuntimeError("Dukascopy downloader produced no CSV")
+        d=pd.read_csv(files[0])
+    d.columns=[str(x).strip().lower() for x in d.columns]
+    # dukascopy-node CSV uses timestamp/open/high/low/close/volume
+    tcol=next((x for x in ["timestamp","time","date","datetime"] if x in d.columns),None)
+    if tcol is None:
+        raise RuntimeError(f"Unknown Dukascopy columns: {list(d.columns)}")
+    d["time"]=pd.to_datetime(d[tcol],utc=True,errors="coerce")
+    need=["open","high","low","close"]
+    if any(x not in d.columns for x in need):
+        raise RuntimeError(f"Missing OHLC columns: {list(d.columns)}")
+    if "volume" not in d.columns:
+        d["volume"]=1.0
+    for x in ["open","high","low","close","volume"]:
+        d[x]=pd.to_numeric(d[x],errors="coerce")
+    d=d.dropna(subset=["time","open","high","low","close"]).sort_values("time").drop_duplicates("time").reset_index(drop=True)
     if len(d)<1000:
-        raise RuntimeError(f"Only {len(d)} candles downloaded; first={d.time.min() if len(d) else None} last={d.time.max() if len(d) else None}")
-    d["time"]=pd.to_datetime(d.time,unit="ms",utc=True)
-    return d
+        raise RuntimeError(f"Only {len(d)} XAUUSD candles downloaded")
+    return d[["time","open","high","low","close","volume"]]
 
 def rma(s,n):
     # TradingView-style RMA: SMA seed then recursive alpha=1/n
