@@ -121,6 +121,35 @@ def backtest(d,buycol,sellcol):
             "net_pnl":float(a.sum()),"final_balance":float(bal),"return_pct":float((bal/START_BALANCE-1)*100),
             "max_closed_dd_pct":float(maxdd),"avg_trade":float(a.mean() if len(a) else 0)}
 
+def backtest_lots(d,buycol,sellcol):
+    """XAUUSD PnL for fixed lot size. Standard contract assumption: 1.00 lot = 100 troy oz."""
+    side=0; entry=0.0; equity=START_BALANCE; peak=equity; maxdd=0.0
+    trades=[]; max_loss=0.0; max_win=0.0
+    qty_oz=LOT_SIZE*OZ_PER_LOT
+    for r in d.itertuples():
+        sig=1 if getattr(r,buycol) else (-1 if getattr(r,sellcol) else 0)
+        if not sig or sig==side:
+            continue
+        if side:
+            pnl=qty_oz*side*(r.close-entry)
+            equity+=pnl; trades.append(pnl)
+            peak=max(peak,equity)
+            maxdd=min(maxdd,equity-peak)
+            max_loss=min(max_loss,pnl); max_win=max(max_win,pnl)
+        side=sig; entry=r.close
+    if side and len(d):
+        px=float(d.close.iloc[-1])
+        pnl=qty_oz*side*(px-entry)
+        equity+=pnl; trades.append(pnl)
+        peak=max(peak,equity); maxdd=min(maxdd,equity-peak)
+        max_loss=min(max_loss,pnl); max_win=max(max_win,pnl)
+    a=np.asarray(trades,float)
+    return {"lot_size":LOT_SIZE,"oz_exposure":qty_oz,"trades":len(a),
+            "wins":int((a>0).sum()),"win_rate":float((a>0).mean()*100 if len(a) else 0),
+            "net_pnl_usd":float(a.sum()),"final_equity":float(equity),
+            "max_closed_dd_usd":float(maxdd),"avg_trade_usd":float(a.mean() if len(a) else 0),
+            "best_trade_usd":float(max_win),"worst_trade_usd":float(max_loss)}
+
 def main():
     d=fetch_bingx(); print("CANDLES",len(d),d.time.iloc[0],d.time.iloc[-1])
     s=signals(d)
@@ -128,6 +157,12 @@ def main():
     for name,b,se in [("RAW_FLIPS","raw_buy","raw_sell"),("SESSION_VWAP_CONFIRMED_ONLY","conf_buy","conf_sell")]:
         r=backtest(s,b,se);r["variant"]=name;rows.append(r)
     pd.DataFrame(rows).to_csv("backtest/data/arc_vwap_xau_5m_summary.csv",index=False)
+    lot_rows=[]
+    for name,b,se in [("RAW_FLIPS","raw_buy","raw_sell"),("SESSION_VWAP_CONFIRMED_ONLY","conf_buy","conf_sell")]:
+        r=backtest_lots(s,b,se); r["variant"]=name; lot_rows.append(r)
+    pd.DataFrame(lot_rows).to_csv("backtest/data/arc_vwap_xau_5m_lot002_summary.csv",index=False)
+    print("\n0.02 LOT RESULTS (1 lot = 100 oz):")
+    print(pd.DataFrame(lot_rows).to_string(index=False))
     s[["time","open","high","low","close","volume","raw_buy","raw_sell","conf_buy","conf_sell"]].to_csv("backtest/data/arc_vwap_xau_5m_signals.csv",index=False)
     print(pd.DataFrame(rows).to_string(index=False))
 
