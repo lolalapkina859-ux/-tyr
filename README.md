@@ -59,3 +59,20 @@ That is intentional: first compare Telegram calls against manual chart analysis 
 - persistent database instead of JSON state
 - chart snapshot attached to Telegram
 - optional Bybit execution module after validation
+
+## Trend Trader M5 (multi-asset signal-only mode)
+
+The Railway `Procfile` runs `trend_trader_main.py`. This mode scans a fixed 10-symbol universe:
+
+- BTCUSDT, ETHUSDT, SOLUSDT — Bybit linear perpetual market candles
+- XAUUSD — Yahoo Finance `GC=F` (COMEX gold futures proxy)
+- XAGUSD — Yahoo Finance `SI=F` (COMEX silver futures proxy)
+- USOIL — Yahoo Finance `CL=F` (WTI crude futures proxy)
+- US500 — Yahoo Finance `ES=F` (E-mini S&P 500 futures proxy)
+- EURUSD, GBPUSD, USDJPY — Yahoo Finance FX reference candles
+
+Signal logic follows the supplied Smart Signal Pro v2 Trend Trader preset: ATR period 10, sensitivity 10, closed M5 candle crossover. Levels: TP1 0.5%, TP2 1.0%, TP3 1.5%, SL 1.0%; TP4 is removed. This mode only sends Telegram alerts and does not place orders.
+
+Railway Variables required: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Optional: `SCAN_INTERVAL_SECONDS` (default 60).
+
+**Data-source limitation:** Yahoo Finance futures/FX symbols are reference-data proxies, not guaranteed to match a broker's XAUUSD/XAGUSD/USOIL/US500/FX CFD feed. Validate prices and symbol sessions against the broker before using alerts for live decisions. Crypto is sourced from Bybit, not BingX. The previous liquidity-engine modules remain in the repository but are not used by this Trend Trader M5 entry point.
