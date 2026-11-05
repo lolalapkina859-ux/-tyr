@@ -9,16 +9,17 @@ BYBIT_URL = "https://api.bybit.com/v5/market/kline"
 
 # The Yahoo tickers are market-data proxies, not guaranteed broker CFD symbols.
 INSTRUMENTS = {
-    "BTCUSDT": ("bybit", "BTCUSDT"),
-    "ETHUSDT": ("bybit", "ETHUSDT"),
-    "SOLUSDT": ("bybit", "SOLUSDT"),
-    "XAUUSD": ("yahoo", "GC=F"),       # COMEX gold futures proxy
-    "XAGUSD": ("yahoo", "SI=F"),       # COMEX silver futures proxy
-    "USOIL": ("yahoo", "CL=F"),       # WTI crude futures proxy
-    "US500": ("yahoo", "ES=F"),        # E-mini S&P 500 futures proxy
-    "EURUSD": ("yahoo", "EURUSD=X"),
-    "GBPUSD": ("yahoo", "GBPUSD=X"),
-    "USDJPY": ("yahoo", "USDJPY=X"),
+    "DXY": {"source": "yfinance", "ticker": "DX-Y.NYB"},
+    "BTC / USDT": {"source": "bingx", "ticker": "BTC-USDT"},
+    "ETH / USDT": {"source": "bingx", "ticker": "ETH-USDT"},
+    "SOL / USDT": {"source": "bingx", "ticker": "SOL-USDT"},
+    "XAU / USD": {"source": "yfinance", "ticker": "XAUT-USD"},
+    "XAG / USD": {"source": "yfinance", "ticker": "SI=F"},
+    "USOIL / USD": {"source": "yfinance", "ticker": "CL=F"},
+    "US500 / USD": {"source": "yfinance", "ticker": "SPY"},
+    "EUR / USD": {"source": "yfinance", "ticker": "EURUSD=X"},
+    "GBP / USD": {"source": "yfinance", "ticker": "GBPUSD=X"},
+    "USD / JPY": {"source": "yfinance", "ticker": "USDJPY=X"},
 }
 
 def _bybit(symbol: str, limit: int = 300) -> pd.DataFrame:
